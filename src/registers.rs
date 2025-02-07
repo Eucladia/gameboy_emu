@@ -38,7 +38,7 @@ pub enum Register {
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[allow(non_camel_case_types)]
 pub enum RegisterPair {
-  /// Psuedo-register of the accumulator & flags that can be used in 16 contexts.
+  /// Psuedo-register of the accumulator & flags that can be used in 16-bit contexts.
   AF,
   /// The register `B` paired with the register `C`.
   BC,

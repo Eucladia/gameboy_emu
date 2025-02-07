@@ -11,15 +11,15 @@ pub enum Instruction {
   // NOTE: Separate `LDD`, `LDI`, and `LDH` from `LD` since they have different semantics.
   /// Load.
   LD(Operand, Operand),
-  /// Load and decrement, equivalent to `LD A, [HL-]` or `LD [HL-] A`.
+  /// Load and decrement, equivalent to `LD A, [HL-]` or `LD [HL-], A`.
   LDD(Operand, Operand),
-  /// Load and increment, equivalent to `LD A, [HL+]` or `LD [HL+] A`.
+  /// Load and increment, equivalent to `LD A, [HL+]` or `LD [HL+], A`.
   LDI(Operand, Operand),
   /// Load high, equivalent to `LD A, [0xFF00 + C]` or `LD [0xFF00 + C], A`.
   LDH(Operand, Operand),
 
   // Arithmetic and logical instructions
-  /// Add with Carry.
+  /// Add with carry.
   ADC(Operand, Operand),
   /// Add.
   ADD(Operand, Operand),
@@ -27,11 +27,11 @@ pub enum Instruction {
   AND(Operand, Operand),
   /// Compare.
   CP(Operand, Operand),
-  /// Decimal adjust accumulato.r
+  /// Decimal adjust accumulator.
   DAA,
   /// Logical OR.
   OR(Operand, Operand),
-  /// Subtract with carry
+  /// Subtract with carry.
   SBC(Operand, Operand),
   /// Subtract.
   SUB(Operand, Operand),
@@ -42,20 +42,20 @@ pub enum Instruction {
   /// Call.
   CALL(Operand, Operand),
   /// Jump.
-  // We can have something like `JP HL` :(, so make an argument optional.
+  // We can have something like `JP HL`, so make an argument optional.
   JP(Option<Operand>, Operand),
   /// Jump relative.
-  // We can have something like `JR e8` :(, so make an argument optional.
+  // We can have something like `JR e8`, so make an argument optional.
   JR(Option<Operand>, Operand),
   /// Return.
-  // We can have something like `RET` :(, so make the argument optional.
+  // We can have something like `RET`, so make the argument optional.
   RET(Option<Operand>),
   /// Return and enable interrupts.
   RETI,
   /// Restart.
   RST(Operand),
   /// Stop.
-  // Stop needs to be followed by any byte, usually 0x0.
+  // NOTE: `STOP` needs to be followed by any byte, usually 0x0.
   STOP(Operand),
   /// Halt.
   HALT,

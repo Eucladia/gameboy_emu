@@ -1,7 +1,10 @@
 use crate::{memory::Memory, registers::Registers};
 
 pub struct Cpu {
-  /// The set flags, where the upper nibble contains the relevant set `Flags`.
+  /// The set flags.
+  ///
+  /// Note: The upper nibble contains the set flags, the lower nibble is always
+  /// zeroed.
   flags: u8,
   /// The clock state.
   clock: ClockState,
