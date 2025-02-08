@@ -20,6 +20,11 @@ pub struct Registers {
   pub pc: u16,
   /// The stack pointer.
   pub sp: u16,
+
+  /// Instruction register.
+  pub ir: u8,
+  /// Interrupt enable register.
+  pub ie: u8,
 }
 
 /// A register.
