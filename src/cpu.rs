@@ -14,7 +14,19 @@ pub struct Cpu {
   registers: Registers,
 }
 
+impl Cpu {
+  pub fn new(mmu: Memory) -> Self {
+    Self {
+      memory: mmu,
+      clock: ClockState::default(),
+      flags: 0,
+      registers: Registers::default(),
+    }
+  }
+}
+
 /// The internal time clock.
+#[derive(Debug, Default, Clone, Eq, PartialEq)]
 struct ClockState {
   /// Machine cycles.
   pub m: u32,

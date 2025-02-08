@@ -54,3 +54,21 @@ pub enum RegisterPair {
   /// Psuedo-register of the stack pointer.
   SP,
 }
+
+impl Default for Registers {
+  fn default() -> Self {
+    Self {
+      a: 0,
+      b: 0,
+      c: 0,
+      d: 0,
+      e: 0,
+      h: 0,
+      l: 0,
+      pc: 0,
+      sp: u16::MAX,
+      ir: 0,
+      ie: 0,
+    }
+  }
+}
