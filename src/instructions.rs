@@ -126,8 +126,10 @@ pub enum Operand {
   Register(Register),
   /// A register pair.  
   RegisterPair(RegisterPair),
-  /// A value stored in memory at the register pair.
-  Memory(RegisterPair),
+  /// A value stored in memory at the value of the register.
+  RegisterMemory(Register),
+  /// A value stored in memory at the value of the register pair.
+  RegisterPairMemory(RegisterPair),
   /// A value stored in memory at the address.
   MemoryAddress(u16),
   /// A conditional flag.

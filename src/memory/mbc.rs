@@ -5,3 +5,11 @@ use crate::memory::Mbc0;
 pub enum MemoryBankController {
   Zero(Mbc0),
 }
+
+impl MemoryBankController {
+  pub fn read_rom(&self, address: u16) -> u8 {
+    match self {
+      MemoryBankController::Zero(mbc) => mbc.read_rom(address),
+    }
+  }
+}
