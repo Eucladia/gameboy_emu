@@ -27,8 +27,6 @@ pub enum Instruction {
   AND(Operand, Operand),
   /// Compare.
   CP(Operand, Operand),
-  /// Decimal adjust accumulator.
-  DAA,
   /// Logical OR.
   OR(Operand, Operand),
   /// Subtract with carry.
@@ -37,6 +35,8 @@ pub enum Instruction {
   SUB(Operand, Operand),
   /// Logical XOR.
   XOR(Operand, Operand),
+  /// Decimal adjust accumulator.
+  DAA,
 
   // Control flow instructions
   /// Call.

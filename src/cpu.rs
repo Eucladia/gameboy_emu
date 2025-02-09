@@ -180,6 +180,180 @@ impl Cpu {
         Operand::Register(Register::A),
         Operand::RegisterMemory(Register::C),
       )),
+      // ADC A, r8 | [HL]
+      0x88..=0x8F => {
+        let src_reg = Register::from_bits((byte & 0b111)).unwrap();
+
+        Some(Instruction::ADC(
+          Operand::Register(Register::A),
+          Operand::Register(src_reg),
+        ))
+      }
+      // ADC A, n8
+      0xCE => {
+        let n8 = mmu.read_byte(self.registers.pc + 1);
+
+        self.registers.pc += 1;
+
+        Some(Instruction::ADC(
+          Operand::Register(Register::A),
+          Operand::Byte(n8),
+        ))
+      }
+      // ADD A, r8 | [HL]
+      0x80..=0x87 => {
+        let src_reg = Register::from_bits((byte & 0b111)).unwrap();
+
+        Some(Instruction::ADD(
+          Operand::Register(Register::A),
+          Operand::Register(src_reg),
+        ))
+      }
+      // ADD A, n8
+      0xC6 => {
+        let n8 = mmu.read_byte(self.registers.pc + 1);
+
+        self.registers.pc += 1;
+
+        Some(Instruction::ADD(
+          Operand::Register(Register::A),
+          Operand::Byte(n8),
+        ))
+      }
+      // ADD SP, n8
+      0xE8 => {
+        let n8 = mmu.read_byte(self.registers.pc + 1);
+
+        self.registers.pc += 1;
+
+        Some(Instruction::ADD(
+          Operand::RegisterPair(RegisterPair::SP),
+          Operand::Byte(n8),
+        ))
+      }
+      // AND A, r8 | [HL]
+      0xA0..=0xA7 => {
+        let src_reg = Register::from_bits(byte & 0b111).unwrap();
+
+        Some(Instruction::AND(
+          Operand::Register(Register::A),
+          Operand::Register(src_reg),
+        ))
+      }
+      // AND A, n8
+      0xE6 => {
+        let n8 = mmu.read_byte(self.registers.pc + 1);
+
+        self.registers.pc += 1;
+
+        Some(Instruction::AND(
+          Operand::Register(Register::A),
+          Operand::Byte(n8),
+        ))
+      }
+      // CP A, r8 | [HL]
+      0xB8..=0xBF => {
+        let src_reg = Register::from_bits(byte & 0b111).unwrap();
+
+        Some(Instruction::CP(
+          Operand::Register(Register::A),
+          Operand::Register(src_reg),
+        ))
+      }
+      // CP A, n8
+      0xFE => {
+        let n8 = mmu.read_byte(self.registers.pc + 1);
+
+        self.registers.pc += 1;
+
+        Some(Instruction::CP(
+          Operand::Register(Register::A),
+          Operand::Byte(n8),
+        ))
+      }
+      // OR A, r8 | [HL]
+      0xB0..=0xB7 => {
+        let src_reg = Register::from_bits(byte & 0b111).unwrap();
+
+        Some(Instruction::OR(
+          Operand::Register(Register::A),
+          Operand::Register(src_reg),
+        ))
+      }
+      // OR A, n8
+      0xF6 => {
+        let n8 = mmu.read_byte(self.registers.pc + 1);
+
+        self.registers.pc += 1;
+
+        Some(Instruction::OR(
+          Operand::Register(Register::A),
+          Operand::Byte(n8),
+        ))
+      }
+      // SBC A, r8 | [HL]
+      0x98..=0x9F => {
+        let src_reg = Register::from_bits(byte & 0b111).unwrap();
+
+        Some(Instruction::SBC(
+          Operand::Register(Register::A),
+          Operand::Register(src_reg),
+        ))
+      }
+      // SBC A, n8
+      0xDE => {
+        let n8 = mmu.read_byte(self.registers.pc + 1);
+
+        self.registers.pc += 1;
+
+        Some(Instruction::SBC(
+          Operand::Register(Register::A),
+          Operand::Byte(n8),
+        ))
+      }
+      // SUB A, r8 | [HL]
+      0x90..=0x97 => {
+        let src_reg = Register::from_bits(byte & 0b111).unwrap();
+
+        Some(Instruction::SUB(
+          Operand::Register(Register::A),
+          Operand::Register(src_reg),
+        ))
+      }
+      // SUB A, n8
+      0xD6 => {
+        let n8 = mmu.read_byte(self.registers.pc + 1);
+
+        self.registers.pc += 1;
+
+        Some(Instruction::SUB(
+          Operand::Register(Register::A),
+          Operand::Byte(n8),
+        ))
+      }
+      // XOR A, r8 | [HL]
+      0xA8..=0xAF => {
+        let src_reg = Register::from_bits(byte & 0b111).unwrap();
+
+        Some(Instruction::XOR(
+          Operand::Register(Register::A),
+          Operand::Register(src_reg),
+        ))
+      }
+      // XOR A, n8
+      0xEE => {
+        let n8 = mmu.read_byte(self.registers.pc + 1);
+
+        self.registers.pc += 1;
+
+        Some(Instruction::XOR(
+          Operand::Register(Register::A),
+          Operand::Byte(n8),
+        ))
+      }
+      // DAA
+      0x27 => Some(Instruction::DAA),
+
       byte => panic!("unimplemented: {byte} ({byte:02X})"),
     }
   }
