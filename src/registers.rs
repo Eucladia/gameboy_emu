@@ -28,13 +28,21 @@ pub struct Registers {
 /// A register.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum Register {
+  /// The register `A`.
   A,
+  /// The register `B`.
   B,
+  /// The register `C`.
   C,
+  /// The register `D`.
   D,
+  /// The register `E`.
   E,
+  /// The register `H`.
   H,
+  /// The register `L`.
   L,
+  /// Psuedo-register that points to the memory at the address of the register pair `HL`.
   M,
 }
 

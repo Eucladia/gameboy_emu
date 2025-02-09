@@ -105,14 +105,10 @@ impl Cpu {
 
         self.registers.pc += 1;
 
-        // Stinky edge case :/
-        let operand = if matches!(dest_reg, Register::M) {
-          Operand::RegisterPairMemory(RegisterPair::HL)
-        } else {
-          Operand::Register(dest_reg)
-        };
-
-        Some(Instruction::LD(operand, Operand::Byte(n8)))
+        Some(Instruction::LD(
+          Operand::Register(dest_reg),
+          Operand::Byte(n8),
+        ))
       }
       // LD HL, SP + n8
       0xF8 => {
