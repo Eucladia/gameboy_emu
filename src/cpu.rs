@@ -409,6 +409,15 @@ impl Cpu {
       // SCF
       0x37 => Instruction::SCF,
 
+      // RLA
+      0x17 => Instruction::RLA,
+      // RLCA
+      0x07 => Instruction::RLCA,
+      // RRA
+      0x1F => Instruction::RRA,
+      // RRCA
+      0x0F => Instruction::RRCA,
+
       byte => panic!("unimplemented: {byte} ({byte:02X})"),
     }
   }
