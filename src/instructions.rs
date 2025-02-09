@@ -40,7 +40,8 @@ pub enum Instruction {
 
   // Control flow instructions
   /// Call.
-  CALL(Operand, Operand),
+  // We can have something like `CALL n16`, so make an argument optional.
+  CALL(Option<Operand>, Operand),
   /// Jump.
   // We can have something like `JP HL`, so make an argument optional.
   JP(Option<Operand>, Operand),

@@ -1,4 +1,5 @@
 use crate::{
+  flags::ConditionalFlags,
   instructions::{Instruction, Operand},
   memory::Mmu,
   registers::{Register, RegisterPair, Registers},
@@ -290,6 +291,87 @@ impl Cpu {
       }
       // DAA
       0x27 => Instruction::DAA,
+
+      // CALL cf, n16
+      0xC4 | 0xD4 | 0xCC | 0xDC => {
+        let cond_flag = ConditionalFlags::from_bits((byte >> 3) & 0b11).unwrap();
+        let n16 = mmu.read_word(self.registers.pc + 1);
+
+        self.registers.pc += 2;
+
+        Instruction::CALL(Some(Operand::Conditional(cond_flag)), Operand::Word(n16))
+      }
+      // CALL n16
+      0xCD => {
+        let n16 = mmu.read_word(self.registers.pc + 1);
+
+        self.registers.pc += 2;
+
+        Instruction::CALL(None, Operand::Word(n16))
+      }
+      // JP cf, n16
+      0xC2 | 0xD2 | 0xCA | 0xDA => {
+        let cond_flag = ConditionalFlags::from_bits((byte >> 3) & 0b11).unwrap();
+        let n16 = mmu.read_word(self.registers.pc + 1);
+
+        self.registers.pc += 2;
+
+        Instruction::JP(Some(Operand::Conditional(cond_flag)), Operand::Word(n16))
+      }
+      // JP n16
+      0xE9 => {
+        let n16 = mmu.read_word(self.registers.pc + 1);
+
+        self.registers.pc += 2;
+
+        Instruction::JP(None, Operand::Word(n16))
+      }
+      // JR cf, n16
+      0x20 | 0x30 | 0x28 | 0x38 => {
+        let cond_flag = ConditionalFlags::from_bits((byte >> 3) & 0b11).unwrap();
+        let n16 = mmu.read_word(self.registers.pc + 1);
+
+        self.registers.pc += 2;
+
+        Instruction::JR(Some(Operand::Conditional(cond_flag)), Operand::Word(n16))
+      }
+      // JR n16
+      0x18 => {
+        let n16 = mmu.read_word(self.registers.pc + 1);
+
+        self.registers.pc += 2;
+
+        Instruction::JR(None, Operand::Word(n16))
+      }
+      // RET cf
+      0xC0 | 0xD0 | 0xC8 | 0xD8 => {
+        let cond_flag = ConditionalFlags::from_bits((byte >> 3) & 0b11).unwrap();
+
+        Instruction::RET(Some(Operand::Conditional(cond_flag)))
+      }
+      // RET
+      0xC9 => Instruction::RET(None),
+      // RETI
+      0xD9 => Instruction::RETI,
+      // RST 0x0 | 0x10 | 0x20 | 0x30 | 0x08 | 0x18 | 0x28 | 0x38
+      0xC7 | 0xD7 | 0xE7 | 0xF7 | 0xCF | 0xDF | 0xEF | 0xFF => {
+        let target = ((byte >> 3) & 0b111) * 8;
+
+        Instruction::RST(Operand::Byte(target))
+      }
+      // STOP n8
+      0x10 => {
+        // NOTE: `STOP` needs to be followed by another byte.
+        let n8 = mmu.read_byte(self.registers.pc + 1);
+
+        self.registers.pc += 1;
+
+        Instruction::STOP(Operand::Byte(n8))
+      }
+      // HALT
+      0x76 => Instruction::HALT,
+      // NOP
+      0x0 => Instruction::NOP,
 
       byte => panic!("unimplemented: {byte} ({byte:02X})"),
     }

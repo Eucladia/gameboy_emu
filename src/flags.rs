@@ -23,3 +23,15 @@ pub enum ConditionalFlags {
   /// The condtion is true if [`Flags::C`] is not set, aka a carry was not produced.
   NC,
 }
+
+impl ConditionalFlags {
+  pub fn from_bits(bits: u8) -> Option<Self> {
+    Some(match bits {
+      0b00 => ConditionalFlags::NZ,
+      0b01 => ConditionalFlags::Z,
+      0b10 => ConditionalFlags::NC,
+      0b11 => ConditionalFlags::C,
+      _ => return None,
+    })
+  }
+}
