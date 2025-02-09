@@ -398,6 +398,17 @@ impl Cpu {
         Instruction::PUSH(Operand::RegisterPair(r16))
       }
 
+      // CCF
+      0x3F => Instruction::CCF,
+      // CPL
+      0x2F => Instruction::CPL,
+      // DI
+      0xF3 => Instruction::DI,
+      // EI
+      0xFB => Instruction::EI,
+      // SCF
+      0x37 => Instruction::SCF,
+
       byte => panic!("unimplemented: {byte} ({byte:02X})"),
     }
   }
