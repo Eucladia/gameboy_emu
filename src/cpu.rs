@@ -418,6 +418,85 @@ impl Cpu {
       // RRCA
       0x0F => Instruction::RRCA,
 
+      // Extended instruction set
+      0xCB => {
+        let next_byte = mmu.read_byte(self.registers.pc + 1);
+
+        self.registers.pc += 1;
+
+        match next_byte {
+          // BIT 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7, r8 | [HL]
+          0x40..=0x7F => {
+            let bit_num = (next_byte >> 3) & 0b111;
+            let src_reg = Register::from_bits(next_byte & 0b111).unwrap();
+
+            Instruction::BIT(Operand::Byte(bit_num), Operand::Register(src_reg))
+          }
+          // RES 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7, r8 | [HL]
+          0x80..=0xBF => {
+            let bit_num = (next_byte >> 3) & 0b111;
+            let src_reg = Register::from_bits(next_byte & 0b111).unwrap();
+
+            Instruction::RES(Operand::Byte(bit_num), Operand::Register(src_reg))
+          }
+          // SET 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7, r8 | [HL]
+          0xC0..=0xFF => {
+            let bit_num = (next_byte >> 3) & 0b111;
+            let src_reg = Register::from_bits(next_byte & 0b111).unwrap();
+
+            Instruction::SET(Operand::Byte(bit_num), Operand::Register(src_reg))
+          }
+          // RL r8 | [HL]
+          0x10..=0x17 => {
+            let src_reg = Register::from_bits(next_byte & 0b111).unwrap();
+
+            Instruction::RL(Operand::Register(src_reg))
+          }
+          // RLC r8 | [HL]
+          0x00..=0x07 => {
+            let src_reg = Register::from_bits(next_byte & 0b111).unwrap();
+
+            Instruction::RLC(Operand::Register(src_reg))
+          }
+          // RR r8 | [HL]
+          0x18..=0x1F => {
+            let src_reg = Register::from_bits(next_byte & 0b111).unwrap();
+
+            Instruction::RR(Operand::Register(src_reg))
+          }
+          // RRC r8 | [HL]
+          0x08..=0x0F => {
+            let src_reg = Register::from_bits(next_byte & 0b111).unwrap();
+
+            Instruction::RRC(Operand::Register(src_reg))
+          }
+          // SLA r8 | [HL]
+          0x20..=0x27 => {
+            let src_reg = Register::from_bits(next_byte & 0b111).unwrap();
+
+            Instruction::SLA(Operand::Register(src_reg))
+          }
+          // SRA r8 | [HL]
+          0x28..=0x2F => {
+            let src_reg = Register::from_bits(next_byte & 0b111).unwrap();
+
+            Instruction::SRA(Operand::Register(src_reg))
+          }
+          // SRL r8 | [HL]
+          0x38..=0x3F => {
+            let src_reg = Register::from_bits(next_byte & 0b111).unwrap();
+
+            Instruction::SRL(Operand::Register(src_reg))
+          }
+          // SWAP r8 | [HL]
+          0x30..=0x37 => {
+            let src_reg = Register::from_bits(next_byte & 0b111).unwrap();
+
+            Instruction::SWAP(Operand::Register(src_reg))
+          }
+        }
+      }
+
       byte => panic!("unimplemented: {byte} ({byte:02X})"),
     }
   }
