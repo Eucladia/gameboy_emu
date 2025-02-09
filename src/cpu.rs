@@ -1,21 +1,21 @@
-use crate::{memory::Memory, registers::Registers};
+use crate::{memory::Mmu, registers::Registers};
 
+#[derive(Debug)]
 pub struct Cpu {
   /// The set flags.
   ///
-  /// Note: The upper nibble contains the set flags, the lower nibble is always
-  /// zeroed.
+  /// Note: The upper nibble contains the set flags, the lower nibble is always zeroed.
   flags: u8,
   /// The clock state.
   clock: ClockState,
   /// The memory.
-  memory: Memory,
+  memory: Mmu,
   /// The registers.
   registers: Registers,
 }
 
 impl Cpu {
-  pub fn new(mmu: Memory) -> Self {
+  pub fn new(mmu: Mmu) -> Self {
     Self {
       memory: mmu,
       clock: ClockState::default(),
