@@ -14,6 +14,8 @@ pub struct Cpu {
   clock: ClockState,
   /// The registers.
   registers: Registers,
+  /// Whether the CPU has been halted.
+  halted: bool,
 }
 
 /// The internal time clock.
@@ -28,8 +30,9 @@ struct ClockState {
 impl Cpu {
   pub fn new(mmu: Mmu) -> Self {
     Self {
-      clock: ClockState::default(),
       flags: 0,
+      halted: false,
+      clock: ClockState::default(),
       registers: Registers::default(),
     }
   }
