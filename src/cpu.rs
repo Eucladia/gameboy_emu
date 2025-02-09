@@ -171,7 +171,7 @@ impl Cpu {
       ),
       // ADC A, r8 | [HL]
       0x88..=0x8F => {
-        let src_reg = Register::from_bits((byte & 0b111)).unwrap();
+        let src_reg = Register::from_bits(byte & 0b111).unwrap();
 
         Instruction::ADC(Operand::Register(Register::A), Operand::Register(src_reg))
       }
@@ -185,7 +185,7 @@ impl Cpu {
       }
       // ADD A, r8 | [HL]
       0x80..=0x87 => {
-        let src_reg = Register::from_bits((byte & 0b111)).unwrap();
+        let src_reg = Register::from_bits(byte & 0b111).unwrap();
 
         Instruction::ADD(Operand::Register(Register::A), Operand::Register(src_reg))
       }
@@ -372,6 +372,31 @@ impl Cpu {
       0x76 => Instruction::HALT,
       // NOP
       0x0 => Instruction::NOP,
+
+      // POP r16
+      0xC1 | 0xD1 | 0xE1 | 0xF1 => {
+        let r16 = match (byte >> 4) & 0b11 {
+          0b00 => RegisterPair::BC,
+          0b01 => RegisterPair::DE,
+          0b10 => RegisterPair::HL,
+          0b11 => RegisterPair::AF,
+          _ => unreachable!("invalid byte passed to pop"),
+        };
+
+        Instruction::POP(Operand::RegisterPair(r16))
+      }
+      // PUSH r16
+      0xC5 | 0xD5 | 0xE5 | 0xF5 => {
+        let r16 = match (byte >> 4) & 0b11 {
+          0b00 => RegisterPair::BC,
+          0b01 => RegisterPair::DE,
+          0b10 => RegisterPair::HL,
+          0b11 => RegisterPair::AF,
+          _ => unreachable!("invalid byte passed to push"),
+        };
+
+        Instruction::PUSH(Operand::RegisterPair(r16))
+      }
 
       byte => panic!("unimplemented: {byte} ({byte:02X})"),
     }
