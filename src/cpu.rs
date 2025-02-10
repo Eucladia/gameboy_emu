@@ -176,11 +176,7 @@ impl Cpu {
 
         self.registers.pc += 1;
 
-        // TODO: Have some kind of high memory operand because this feels wrong...
-        Instruction::LDH(
-          Operand::MemoryAddress(0xFF00_u16.wrapping_add(n8 as u16)),
-          Operand::Register(Register::A),
-        )
+        Instruction::LDH(Operand::HighMemoryByte(n8), Operand::Register(Register::A))
       }
       // LDH A, [0xFF00 + a8]
       0xF0 => {
@@ -188,20 +184,17 @@ impl Cpu {
 
         self.registers.pc += 1;
 
-        Instruction::LDH(
-          Operand::Register(Register::A),
-          Operand::MemoryAddress(0xFF00_u16.wrapping_add(n8 as u16)),
-        )
+        Instruction::LDH(Operand::Register(Register::A), Operand::HighMemoryByte(n8))
       }
       // LDH [0xFF00 + C], A
       0xE2 => Instruction::LDH(
-        Operand::RegisterMemory(Register::C),
+        Operand::HighMemoryRegister(Register::C),
         Operand::Register(Register::A),
       ),
       // LDH A, [0xFF00 + C]
       0xF2 => Instruction::LDH(
         Operand::Register(Register::A),
-        Operand::RegisterMemory(Register::C),
+        Operand::HighMemoryRegister(Register::C),
       ),
       // ADC A, r8 | [HL]
       0x88..=0x8F => {
