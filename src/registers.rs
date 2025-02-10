@@ -65,15 +65,20 @@ pub enum RegisterPair {
 impl Register {
   /// Returns a register from its encoded 3 bits.
   pub fn from_bits(bits: u8) -> Option<Self> {
+    Register::try_from(bits).ok()
+  }
+}
+
+impl RegisterPair {
+  // Gets a register pair from 2 bits. If `use_af` is true, then `0b11` will
+  // return [`RegisterPair::AF`] instead of [`RegisterPair::SP`].
+  pub fn from_bits(bits: u8, use_af: bool) -> Option<Self> {
     Some(match bits {
-      0b000 => Register::B,
-      0b001 => Register::C,
-      0b010 => Register::D,
-      0b011 => Register::E,
-      0b100 => Register::H,
-      0b101 => Register::L,
-      0b110 => Register::M,
-      0b111 => Register::A,
+      0b00 => RegisterPair::BC,
+      0b01 => RegisterPair::DE,
+      0b10 => RegisterPair::HL,
+      0b11 if use_af => RegisterPair::AF,
+      0b11 if !use_af => RegisterPair::SP,
       _ => return None,
     })
   }
@@ -93,5 +98,23 @@ impl Default for Registers {
       sp: u16::MAX,
       ir: 0,
     }
+  }
+}
+
+impl TryFrom<u8> for Register {
+  type Error = ();
+
+  fn try_from(value: u8) -> Result<Self, Self::Error> {
+    Ok(match value {
+      0b000 => Register::B,
+      0b001 => Register::C,
+      0b010 => Register::D,
+      0b011 => Register::E,
+      0b100 => Register::H,
+      0b101 => Register::L,
+      0b110 => Register::M,
+      0b111 => Register::A,
+      _ => return Err(()),
+    })
   }
 }

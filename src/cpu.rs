@@ -57,18 +57,12 @@ impl Cpu {
       }
       // LD r16, n16
       0x01 | 0x11 | 0x21 | 0x31 => {
-        let dest_reg_pair = match (byte >> 4) & 0b11 {
-          0b00 => RegisterPair::BC,
-          0b01 => RegisterPair::DE,
-          0b10 => RegisterPair::HL,
-          0b11 => RegisterPair::SP,
-          b => unreachable!("incorrect register pair passed to LD: {b:02X}"),
-        };
+        let r16 = RegisterPair::from_bits((byte >> 4) & 0b11, false).unwrap();
         let n16 = mmu.read_word(self.registers.pc + 1);
 
         self.registers.pc += 2;
 
-        Instruction::LD(Operand::RegisterPair(dest_reg_pair), Operand::Word(n16))
+        Instruction::LD(Operand::RegisterPair(r16), Operand::Word(n16))
       }
       // LD [r16], A
       0x02 | 0x12 => {
@@ -226,17 +220,11 @@ impl Cpu {
       }
       // ADD HL, r16
       0x09 | 0x19 | 0x29 | 0x39 => {
-        let src_reg_pair = match (byte >> 4) & 0b11 {
-          0b00 => RegisterPair::BC,
-          0b01 => RegisterPair::DE,
-          0b10 => RegisterPair::HL,
-          0b11 => RegisterPair::SP,
-          b => unreachable!("incorrect register pair passed to ADD HL: {b:02X}"),
-        };
+        let r16 = RegisterPair::from_bits((byte >> 4) & 0b11, false).unwrap();
 
         Instruction::ADD(
           Operand::RegisterPair(RegisterPair::HL),
-          Operand::RegisterPair(src_reg_pair),
+          Operand::RegisterPair(r16),
         )
       }
       // ADD SP, n8
@@ -283,15 +271,9 @@ impl Cpu {
       }
       // DEC r16
       0x0B | 0x1B | 0x2B | 0x3B => {
-        let dest_reg_pair = match (byte >> 4) & 0b11 {
-          0b00 => RegisterPair::BC,
-          0b01 => RegisterPair::DE,
-          0b10 => RegisterPair::HL,
-          0b11 => RegisterPair::SP,
-          b => unreachable!("incorrect register pair passed to DEC: {b:02X}"),
-        };
+        let r16 = RegisterPair::from_bits((byte >> 4) & 0b11, false).unwrap();
 
-        Instruction::DEC(Operand::RegisterPair(dest_reg_pair))
+        Instruction::DEC(Operand::RegisterPair(r16))
       }
       // INC r8
       0x04 | 0x14 | 0x24 | 0x34 | 0x0C | 0x1C | 0x2C | 0x3C => {
@@ -301,15 +283,9 @@ impl Cpu {
       }
       // INC r16
       0x03 | 0x13 | 0x23 | 0x33 => {
-        let dest_reg_pair = match (byte >> 4) & 0b11 {
-          0b00 => RegisterPair::BC,
-          0b01 => RegisterPair::DE,
-          0b10 => RegisterPair::HL,
-          0b11 => RegisterPair::SP,
-          b => unreachable!("incorrect register pair passed to INC: {b:02X}"),
-        };
+        let r16 = RegisterPair::from_bits((byte >> 4) & 0b11, false).unwrap();
 
-        Instruction::INC(Operand::RegisterPair(dest_reg_pair))
+        Instruction::INC(Operand::RegisterPair(r16))
       }
       // OR A, r8 | [HL]
       0xB0..=0xB7 => {
@@ -455,25 +431,13 @@ impl Cpu {
 
       // POP r16
       0xC1 | 0xD1 | 0xE1 | 0xF1 => {
-        let r16 = match (byte >> 4) & 0b11 {
-          0b00 => RegisterPair::BC,
-          0b01 => RegisterPair::DE,
-          0b10 => RegisterPair::HL,
-          0b11 => RegisterPair::AF,
-          b => unreachable!("incorrect register pair passed to POP: {b:02X}"),
-        };
+        let r16 = RegisterPair::from_bits((byte >> 4) & 0b11, true).unwrap();
 
         Instruction::POP(Operand::RegisterPair(r16))
       }
       // PUSH r16
       0xC5 | 0xD5 | 0xE5 | 0xF5 => {
-        let r16 = match (byte >> 4) & 0b11 {
-          0b00 => RegisterPair::BC,
-          0b01 => RegisterPair::DE,
-          0b10 => RegisterPair::HL,
-          0b11 => RegisterPair::AF,
-          b => unreachable!("incorrect register pair passed to PUSH: {b:02X}"),
-        };
+        let r16 = RegisterPair::from_bits((byte >> 4) & 0b11, true).unwrap();
 
         Instruction::PUSH(Operand::RegisterPair(r16))
       }
