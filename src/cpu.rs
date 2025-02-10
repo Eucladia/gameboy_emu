@@ -170,7 +170,7 @@ impl Cpu {
         Operand::Register(Register::A),
         Operand::RegisterPairMemory(RegisterPair::HL),
       ),
-      // LDH [a8], A
+      // LDH [0xFF00 + a8], A
       0xE0 => {
         let n8 = mmu.read_byte(self.registers.pc + 1);
 
@@ -182,7 +182,7 @@ impl Cpu {
           Operand::Register(Register::A),
         )
       }
-      // LDH A, [a8]
+      // LDH A, [0xFF00 + a8]
       0xF0 => {
         let n8 = mmu.read_byte(self.registers.pc + 1);
 
