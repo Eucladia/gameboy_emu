@@ -27,6 +27,10 @@ pub enum Instruction {
   AND(Operand, Operand),
   /// Compare.
   CP(Operand, Operand),
+  // Decrement.
+  DEC(Operand),
+  // Increment.
+  INC(Operand),
   /// Logical OR.
   OR(Operand, Operand),
   /// Subtract with carry.
