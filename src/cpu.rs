@@ -319,13 +319,15 @@ impl Cpu {
         Instruction::JP(Some(Operand::Conditional(cond_flag)), Operand::Word(n16))
       }
       // JP n16
-      0xE9 => {
+      0xC3 => {
         let n16 = mmu.read_word(self.registers.pc + 1);
 
         self.registers.pc += 2;
 
         Instruction::JP(None, Operand::Word(n16))
       }
+      // JP HL
+      0xE9 => Instruction::JP(None, Operand::RegisterPair(RegisterPair::HL)),
       // JR cf, n16
       0x20 | 0x30 | 0x28 | 0x38 => {
         let cond_flag = ConditionalFlags::from_bits((byte >> 3) & 0b11).unwrap();
