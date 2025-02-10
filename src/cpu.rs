@@ -39,12 +39,12 @@ impl Cpu {
   }
 
   pub fn execute_instruction(&mut self, mmu: &Mmu) {
-    let instruction = self.parse_instruction(mmu);
+    let instruction = self.fetch_instruction(mmu);
 
     self.registers.pc += 1;
   }
 
-  pub fn parse_instruction(&mut self, mmu: &Mmu) -> Instruction {
+  pub fn fetch_instruction(&mut self, mmu: &Mmu) -> Instruction {
     let byte = mmu.read_byte(self.registers.pc);
 
     match byte {
