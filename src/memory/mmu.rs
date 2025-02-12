@@ -69,7 +69,7 @@ impl Mmu {
       // Interrupt enable
       0xFFFF => self.interrupt_enable = value,
       // Unwritable regions
-      _ => (),
+      _ => {}
     }
   }
 }
