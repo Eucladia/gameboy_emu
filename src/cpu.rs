@@ -45,6 +45,9 @@ impl Cpu {
   /// Executes one cycle.
   pub fn step(&mut self, mmu: &mut Mmu) {
     let byte = self.fetch_instruction(mmu);
+
+    self.registers.ir = byte;
+
     let instruction = self.decode_instruction(byte, mmu);
     let i_size = instruction.bytes_occupied();
 
