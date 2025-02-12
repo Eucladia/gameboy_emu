@@ -13,7 +13,7 @@ pub enum Flags {
 
 /// Flags that conditional instructions use.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum ConditionalFlags {
+pub enum ConditionalFlag {
   /// The condtion is true if [`Flags::Z`] is set, aka a zero was produced.
   Z,
   /// The condtion is true if [`Flags::C`] is set, aka a carry was produced.
@@ -24,13 +24,13 @@ pub enum ConditionalFlags {
   NC,
 }
 
-impl ConditionalFlags {
+impl ConditionalFlag {
   pub fn from_bits(bits: u8) -> Option<Self> {
     Some(match bits {
-      0b00 => ConditionalFlags::NZ,
-      0b01 => ConditionalFlags::Z,
-      0b10 => ConditionalFlags::NC,
-      0b11 => ConditionalFlags::C,
+      0b00 => ConditionalFlag::NZ,
+      0b01 => ConditionalFlag::Z,
+      0b10 => ConditionalFlag::NC,
+      0b11 => ConditionalFlag::C,
       _ => return None,
     })
   }

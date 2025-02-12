@@ -1,5 +1,5 @@
 use crate::{
-  flags::ConditionalFlags,
+  flags::ConditionalFlag,
   registers::{Register, RegisterPair},
 };
 
@@ -142,7 +142,7 @@ pub enum Operand {
   /// A value stored in memory at the address.
   MemoryAddress(u16),
   /// A conditional flag.
-  Conditional(ConditionalFlags),
+  Conditional(ConditionalFlag),
 }
 
 impl Instruction {
