@@ -46,17 +46,19 @@ impl Cpu {
   pub fn step(&mut self, mmu: &mut Mmu) {
     let byte = self.fetch_instruction(mmu);
 
+    self.registers.pc += 1;
     self.registers.ir = byte;
 
     let instruction = self.decode_instruction(byte, mmu);
-    let i_size = instruction.bytes_occupied();
+    // Subtract a byte since we accounted for the instruction byte itself already
+    let i_size = instruction.bytes_occupied() - 1;
 
     self.registers.pc = self.registers.pc.wrapping_add(i_size as u16);
 
     self.execute_instruction(mmu, &instruction);
   }
 
-  /// Fetches the next instruction.
+  /// Fetches the next instruction byte.
   pub fn fetch_instruction(&self, mmu: &Mmu) -> u8 {
     mmu.read_byte(self.registers.pc)
   }
@@ -999,7 +1001,7 @@ impl Cpu {
   }
 
   /// Decodes a byte into an [`Instruction`].
-  pub fn decode_instruction(&mut self, byte: u8, mmu: &Mmu) -> Instruction {
+  pub fn decode_instruction(&self, byte: u8, mmu: &Mmu) -> Instruction {
     match byte {
       // LD r8, r8
       0x40..0x76 | 0x77..=0x7F => {
@@ -1011,9 +1013,7 @@ impl Cpu {
       // LD r16, n16
       0x01 | 0x11 | 0x21 | 0x31 => {
         let r16 = RegisterPair::from_bits((byte >> 4) & 0b11, false).unwrap();
-        let n16 = mmu.read_word(self.registers.pc + 1);
-
-        self.registers.pc += 2;
+        let n16 = mmu.read_word(self.registers.pc);
 
         Instruction::LD(Operand::RegisterPair(r16), Operand::Word(n16))
       }
@@ -1045,9 +1045,7 @@ impl Cpu {
       }
       // LD [a16], SP
       0x08 => {
-        let n16 = mmu.read_word(self.registers.pc + 1);
-
-        self.registers.pc += 2;
+        let n16 = mmu.read_word(self.registers.pc);
 
         Instruction::LD(
           Operand::MemoryAddress(n16),
@@ -1057,17 +1055,13 @@ impl Cpu {
       // LD r8 | [HL], n8
       0x06 | 0x16 | 0x26 | 0x36 | 0x0E | 0x1E | 0x2E | 0x3E => {
         let dest_reg = Register::from_bits((byte >> 3) & 0b111).unwrap();
-        let n8 = mmu.read_byte(self.registers.pc + 1);
-
-        self.registers.pc += 1;
+        let n8 = mmu.read_byte(self.registers.pc);
 
         Instruction::LD(Operand::Register(dest_reg), Operand::Byte(n8))
       }
       // LD HL, SP + n8
       0xF8 => {
-        let n8 = mmu.read_byte(self.registers.pc + 1);
-
-        self.registers.pc += 1;
+        let n8 = mmu.read_byte(self.registers.pc);
 
         Instruction::LD(
           Operand::RegisterPair(RegisterPair::HL),
@@ -1081,17 +1075,13 @@ impl Cpu {
       ),
       // LD [n16], A
       0xEA => {
-        let n16 = mmu.read_word(self.registers.pc + 1);
-
-        self.registers.pc += 2;
+        let n16 = mmu.read_word(self.registers.pc);
 
         Instruction::LD(Operand::MemoryAddress(n16), Operand::Register(Register::A))
       }
       // LD A, [n16]
       0xFA => {
-        let n16 = mmu.read_word(self.registers.pc + 1);
-
-        self.registers.pc += 2;
+        let n16 = mmu.read_word(self.registers.pc);
 
         Instruction::LD(Operand::Register(Register::A), Operand::MemoryAddress(n16))
       }
@@ -1117,17 +1107,13 @@ impl Cpu {
       ),
       // LDH [0xFF00 + n8], A
       0xE0 => {
-        let n8 = mmu.read_byte(self.registers.pc + 1);
-
-        self.registers.pc += 1;
+        let n8 = mmu.read_byte(self.registers.pc);
 
         Instruction::LDH(Operand::HighMemoryByte(n8), Operand::Register(Register::A))
       }
       // LDH A, [0xFF00 + n8]
       0xF0 => {
-        let n8 = mmu.read_byte(self.registers.pc + 1);
-
-        self.registers.pc += 1;
+        let n8 = mmu.read_byte(self.registers.pc);
 
         Instruction::LDH(Operand::Register(Register::A), Operand::HighMemoryByte(n8))
       }
@@ -1149,9 +1135,7 @@ impl Cpu {
       }
       // ADC A, n8
       0xCE => {
-        let n8 = mmu.read_byte(self.registers.pc + 1);
-
-        self.registers.pc += 1;
+        let n8 = mmu.read_byte(self.registers.pc);
 
         Instruction::ADC(Operand::Register(Register::A), Operand::Byte(n8))
       }
@@ -1163,9 +1147,7 @@ impl Cpu {
       }
       // ADD A, n8
       0xC6 => {
-        let n8 = mmu.read_byte(self.registers.pc + 1);
-
-        self.registers.pc += 1;
+        let n8 = mmu.read_byte(self.registers.pc);
 
         Instruction::ADD(Operand::Register(Register::A), Operand::Byte(n8))
       }
@@ -1180,9 +1162,7 @@ impl Cpu {
       }
       // ADD SP, n8
       0xE8 => {
-        let n8 = mmu.read_byte(self.registers.pc + 1);
-
-        self.registers.pc += 1;
+        let n8 = mmu.read_byte(self.registers.pc);
 
         Instruction::ADD(Operand::RegisterPair(RegisterPair::SP), Operand::Byte(n8))
       }
@@ -1194,9 +1174,7 @@ impl Cpu {
       }
       // AND A, n8
       0xE6 => {
-        let n8 = mmu.read_byte(self.registers.pc + 1);
-
-        self.registers.pc += 1;
+        let n8 = mmu.read_byte(self.registers.pc);
 
         Instruction::AND(Operand::Register(Register::A), Operand::Byte(n8))
       }
@@ -1208,9 +1186,7 @@ impl Cpu {
       }
       // CP A, n8
       0xFE => {
-        let n8 = mmu.read_byte(self.registers.pc + 1);
-
-        self.registers.pc += 1;
+        let n8 = mmu.read_byte(self.registers.pc);
 
         Instruction::CP(Operand::Register(Register::A), Operand::Byte(n8))
       }
@@ -1246,9 +1222,7 @@ impl Cpu {
       }
       // OR A, n8
       0xF6 => {
-        let n8 = mmu.read_byte(self.registers.pc + 1);
-
-        self.registers.pc += 1;
+        let n8 = mmu.read_byte(self.registers.pc);
 
         Instruction::OR(Operand::Register(Register::A), Operand::Byte(n8))
       }
@@ -1260,9 +1234,7 @@ impl Cpu {
       }
       // SBC A, n8
       0xDE => {
-        let n8 = mmu.read_byte(self.registers.pc + 1);
-
-        self.registers.pc += 1;
+        let n8 = mmu.read_byte(self.registers.pc);
 
         Instruction::SBC(Operand::Register(Register::A), Operand::Byte(n8))
       }
@@ -1274,9 +1246,7 @@ impl Cpu {
       }
       // SUB A, n8
       0xD6 => {
-        let n8 = mmu.read_byte(self.registers.pc + 1);
-
-        self.registers.pc += 1;
+        let n8 = mmu.read_byte(self.registers.pc);
 
         Instruction::SUB(Operand::Register(Register::A), Operand::Byte(n8))
       }
@@ -1288,9 +1258,7 @@ impl Cpu {
       }
       // XOR A, n8
       0xEE => {
-        let n8 = mmu.read_byte(self.registers.pc + 1);
-
-        self.registers.pc += 1;
+        let n8 = mmu.read_byte(self.registers.pc);
 
         Instruction::XOR(Operand::Register(Register::A), Operand::Byte(n8))
       }
@@ -1300,34 +1268,26 @@ impl Cpu {
       // CALL cf, n16
       0xC4 | 0xD4 | 0xCC | 0xDC => {
         let cond_flag = ConditionalFlag::from_bits((byte >> 3) & 0b11).unwrap();
-        let n16 = mmu.read_word(self.registers.pc + 1);
-
-        self.registers.pc += 2;
+        let n16 = mmu.read_word(self.registers.pc);
 
         Instruction::CALL(Some(Operand::Conditional(cond_flag)), Operand::Word(n16))
       }
       // CALL n16
       0xCD => {
-        let n16 = mmu.read_word(self.registers.pc + 1);
-
-        self.registers.pc += 2;
+        let n16 = mmu.read_word(self.registers.pc);
 
         Instruction::CALL(None, Operand::Word(n16))
       }
       // JP cf, n16
       0xC2 | 0xD2 | 0xCA | 0xDA => {
         let cond_flag = ConditionalFlag::from_bits((byte >> 3) & 0b11).unwrap();
-        let n16 = mmu.read_word(self.registers.pc + 1);
-
-        self.registers.pc += 2;
+        let n16 = mmu.read_word(self.registers.pc);
 
         Instruction::JP(Some(Operand::Conditional(cond_flag)), Operand::Word(n16))
       }
       // JP n16
       0xC3 => {
-        let n16 = mmu.read_word(self.registers.pc + 1);
-
-        self.registers.pc += 2;
+        let n16 = mmu.read_word(self.registers.pc);
 
         Instruction::JP(None, Operand::Word(n16))
       }
@@ -1336,17 +1296,13 @@ impl Cpu {
       // JR cf, n16
       0x20 | 0x30 | 0x28 | 0x38 => {
         let cond_flag = ConditionalFlag::from_bits((byte >> 3) & 0b11).unwrap();
-        let n16 = mmu.read_word(self.registers.pc + 1);
-
-        self.registers.pc += 2;
+        let n16 = mmu.read_word(self.registers.pc);
 
         Instruction::JR(Some(Operand::Conditional(cond_flag)), Operand::Word(n16))
       }
       // JR n8
       0x18 => {
-        let n8 = mmu.read_byte(self.registers.pc + 1);
-
-        self.registers.pc += 1;
+        let n8 = mmu.read_byte(self.registers.pc);
 
         Instruction::JR(None, Operand::Byte(n8))
       }
@@ -1370,9 +1326,7 @@ impl Cpu {
       // STOP n8
       0x10 => {
         // NOTE: `STOP` needs to be followed by another byte.
-        let n8 = mmu.read_byte(self.registers.pc + 1);
-
-        self.registers.pc += 1;
+        let n8 = mmu.read_byte(self.registers.pc);
 
         Instruction::STOP(Operand::Byte(n8))
       }
@@ -1416,9 +1370,7 @@ impl Cpu {
 
       // Extended instruction set
       0xCB => {
-        let next_byte = mmu.read_byte(self.registers.pc + 1);
-
-        self.registers.pc += 1;
+        let next_byte = mmu.read_byte(self.registers.pc);
 
         match next_byte {
           // BIT 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7, r8 | [HL]
