@@ -46,7 +46,7 @@ impl Cpu {
   pub fn step(&mut self, mmu: &mut Mmu) {
     let byte = self.fetch_instruction(mmu);
 
-    self.registers.pc += 1;
+    self.registers.pc = self.registers.pc.wrapping_add(1);
     self.registers.ir = byte;
 
     let instruction = self.decode_instruction(byte, mmu);
@@ -655,7 +655,7 @@ impl Cpu {
           let upper = mmu.read_byte(self.registers.sp + 1);
 
           self.registers.pc = ((upper as u16) << 8) | lower as u16;
-          self.registers.sp += 2;
+          self.registers.sp = self.registers.sp.wrapping_add(2);
           self.clock.advance(5);
         } else {
           self.clock.advance(2);
@@ -666,7 +666,7 @@ impl Cpu {
         let upper = mmu.read_byte(self.registers.sp + 1);
 
         self.registers.pc = ((upper as u16) << 8) | lower as u16;
-        self.registers.sp += 2;
+        self.registers.sp = self.registers.sp.wrapping_add(2);
         self.clock.advance(4);
       }
       RETI => {
@@ -674,7 +674,7 @@ impl Cpu {
         let upper = mmu.read_byte(self.registers.sp + 1);
 
         self.registers.pc = ((upper as u16) << 8) | lower as u16;
-        self.registers.sp += 2;
+        self.registers.sp = self.registers.wrapping_add(2);
         self.master_interrupt_enabled = true;
         self.clock.advance(4);
       }
@@ -709,7 +709,7 @@ impl Cpu {
 
         self.write_register_pair(*rp, value);
 
-        self.registers.sp += 2;
+        self.registers.sp = self.registers.sp.wrapping_add(2);
         self.clock.advance(4);
       }
       PUSH(Operand::RegisterPair(rp)) => {
@@ -1560,7 +1560,7 @@ impl ClockState {
 
   /// Advance the internal clock by the following machine cycles.
   pub fn advance(&mut self, m_cycles: usize) {
-    self.m_cycles += m_cycles;
-    self.t_cycles = m_cycles * 4;
+    self.m_cycles = self.m_cycles.wrapping_add(m_cycles);
+    self.t_cycles = self.t_cycles.wrapping_add(m_cycles * 4);
   }
 }
