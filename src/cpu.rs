@@ -978,8 +978,8 @@ impl Cpu {
       }
       SWAP(Operand::Register(reg)) => {
         let reg_value = self.read_register(mmu, *reg);
-        let lower = reg_value & 0b00001111;
-        let upper = reg_value & 0b11110000;
+        let lower = reg_value & 0x0F;
+        let upper = reg_value & 0xF0;
         let res = (lower << 4) | (upper >> 4);
 
         self.write_register(mmu, *reg, res);
@@ -1319,7 +1319,7 @@ impl Cpu {
       // RST 0x0 | 0x10 | 0x20 | 0x30 | 0x08 | 0x18 | 0x28 | 0x38
       0xC7 | 0xD7 | 0xE7 | 0xF7 | 0xCF | 0xDF | 0xEF | 0xFF => {
         // The target is encoded in bits 3 through 5.
-        let target = byte & 0b00111000;
+        let target = byte & 0b111000;
 
         Instruction::RST(Operand::Byte(target))
       }
