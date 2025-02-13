@@ -12,4 +12,10 @@ impl MemoryBankController {
       MemoryBankController::Zero(mbc) => mbc.read_rom(address),
     }
   }
+
+  pub fn write_rom(&mut self, address: u16, value: u8) {
+    match self {
+      MemoryBankController::Zero(mbc) => mbc.write_rom(address, value),
+    }
+  }
 }

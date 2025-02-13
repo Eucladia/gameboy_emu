@@ -674,7 +674,7 @@ impl Cpu {
         let upper = mmu.read_byte(self.registers.sp + 1);
 
         self.registers.pc = ((upper as u16) << 8) | lower as u16;
-        self.registers.sp = self.registers.wrapping_add(2);
+        self.registers.sp = self.registers.sp.wrapping_add(2);
         self.master_interrupt_enabled = true;
         self.clock.advance(4);
       }
