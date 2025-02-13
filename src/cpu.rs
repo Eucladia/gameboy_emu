@@ -18,7 +18,7 @@ pub struct Cpu {
   /// Whether the CPU has been "stopped".
   stopped: bool,
   /// Master interrupt flag.
-  ime: bool,
+  master_interrupt_enabled: bool,
 }
 
 /// The internal time clock.
@@ -34,7 +34,7 @@ impl Cpu {
   pub fn new(mmu: Mmu) -> Self {
     Self {
       flags: 0,
-      ime: false,
+      master_interrupt_enabled: false,
       stopped: false,
       halted: false,
       clock: ClockState::default(),
@@ -675,7 +675,7 @@ impl Cpu {
 
         self.registers.pc = ((upper as u16) << 8) | lower as u16;
         self.registers.sp += 2;
-        self.ime = true;
+        self.master_interrupt_enabled = true;
         self.clock.advance(4);
       }
       RST(Operand::Byte(target)) => {
@@ -739,11 +739,11 @@ impl Cpu {
         self.clock.tick();
       }
       DI => {
-        self.ime = false;
+        self.master_interrupt_enabled = false;
         self.clock.tick();
       }
       EI => {
-        self.ime = true;
+        self.master_interrupt_enabled = true;
         self.clock.tick();
       }
       SCF => {
