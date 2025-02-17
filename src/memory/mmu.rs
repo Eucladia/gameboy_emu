@@ -1,51 +1,83 @@
+use std::ops::Range;
+
 use crate::memory::{Mbc0, MemoryBankController};
+
+/// The starting address for ROM bank 0.
+pub const ROM_BANK_0_START: u16 = 0;
+/// The ending address for ROM bank 0.
+pub const ROM_BANK_0_END: u16 = 0x4000;
+/// The starting address for the switchable ROM bank.
+pub const ROM_BANK_N_START: u16 = 0x4000;
+/// The ending address  for the switchable ROM bank.
+pub const ROM_BANK_N_END: u16 = 0x8000;
+/// The starting address for VRAM.
+pub const VIDEO_RAM_START: u16 = 0x8000;
+/// The ending address  for VRAM.
+pub const VIDEO_RAM_END: u16 = 0xA000;
+/// The starting address for the cartridges RAM.
+pub const EXTERNAL_RAM_START: u16 = 0xA000;
+/// The ending address for the cartridges  RAM.
+pub const EXTERNAL_RAM_END: u16 = 0xC000;
+/// The starting address for internal RAM.
+pub const INTERNAL_RAM_START: u16 = 0xC000;
+/// The ending address for internal RAM.
+pub const INTERNAL_RAM_END: u16 = 0xE000;
+/// The starting address for echo RAM.
+pub const ECHO_RAM_START: u16 = 0xE000;
+/// The ending address for echo RAM.
+pub const ECHO_RAM_END: u16 = 0xFE00;
+/// The starting address for the OAM (sprite attribute memory).
+pub const OAM_START: u16 = 0xFE00;
+/// The ending address for the OAM (sprite attribute memory).
+pub const OAM_END: u16 = 0xFEA0;
+/// The starting address for unused memory.
+pub const UNUSED_START: u16 = 0xFEA0;
+/// The ending address for unused memory.
+pub const UNUSED_END: u16 = 0xFF00;
+/// The starting address for I/O registers.
+pub const IO_START: u16 = 0xFF00;
+/// The ending address for I/O registers.
+pub const IO_END: u16 = 0xFF80;
+/// The starting address for HRAM.
+pub const HIGH_RAM_START: u16 = 0xFF80;
+/// The ending address for HRAM.
+pub const HIGH_RAM_END: u16 = 0xFFFF;
+/// The interrupt enable register.
+pub const INTERRUPT_ENABLE_REGISTER: u16 = 0xFFFF;
+
+#[derive(Debug, Copy, Clone)]
+#[repr(u8)]
+/// The types of interrupts.
+pub enum Interrupt {
+  VBlank = 1 << 0,
+  LCD = 1 << 1,
+  Timer = 1 << 2,
+  Serial = 1 << 3,
+  Joypad = 1 << 4,
+}
 
 const CARTRIDGE_TYPE: u16 = 0x147;
 
 /// The memory management unit for the Gameboy.
 #[derive(Debug)]
 pub struct Mmu {
-  /// The available work RAM.
-  ram: [u8; 0x2000],
-  /// The high RAM.
-  hram: [u8; 0x7F],
-  /// The I/O registers.
-  io_registers: IoRegisters,
-  /// The interrupt enable register
-  interrupt_enable: u8,
+  /// The available memory to work with.
+  memory: [u8; u16::MAX as usize + 1],
   /// The memory bank controller this cartridge uses.
   mbc: MemoryBankController,
 }
 
-#[derive(Debug)]
-struct IoRegisters {
-  /// The joypad.
-  // 0xFF00
-  joypad: u8,
-  /// Timer registers.
-  // 0xFF04 - 0xFF07
-  timer: [u8; 4],
-  /// Whether there was an interrupt.
-  // 0xFF0F
-  interrupt_flag: u8,
-  /// LCD registers.
-  // 0xFF40 - 0xFF48
-  lcd: [u8; 12],
-}
-
 impl Mmu {
   /// Creates a new memory manager.
-  pub fn new(rom: Vec<u8>) -> Self {
-    let mbc = match rom[CARTRIDGE_TYPE as usize] {
-      0 => MemoryBankController::Zero(Mbc0::new(rom)),
+  pub fn new(cartridge: Vec<u8>) -> Self {
+    let mbc = match cartridge[CARTRIDGE_TYPE as usize] {
+      0 => MemoryBankController::Zero(Mbc0::new(cartridge)),
       b => panic!("got invalid memory cartridge type: {b:02X}"),
     };
 
     Self {
+      memory: [0; u16::MAX as usize + 1],
       mbc,
-      ram: [0; 0x2000],
-      hram: [0; 0x7f],
-      interrupt_enable: 0,
     }
   }
 
@@ -53,19 +85,30 @@ impl Mmu {
   pub fn read_byte(&self, address: u16) -> u8 {
     match address {
       // ROM
-      0x0000..0x8000 => self.mbc.read_rom(address),
-      // Working RAM
-      0xC000..0xE000 => self.ram[(address - 0xC000) as usize],
-      // Echo RAM - A copy of working RAM
-      0xE000..0xFE00 => self.ram[(address - 0xE000) as usize],
+      ROM_BANK_0_START..ROM_BANK_0_END => self.mbc.read_rom(address),
+      // Switchable ROM bank
+      ROM_BANK_N_START..ROM_BANK_N_END => self.mbc.read_rom(address),
+      // Video RAM
+      VIDEO_RAM_START..VIDEO_RAM_END => self.memory[address as usize],
+      // Cartridge RAM
+      EXTERNAL_RAM_START..EXTERNAL_RAM_END => self.memory[address as usize],
+      // Work RAM
+      INTERNAL_RAM_START..INTERNAL_RAM_END => self.memory[address as usize],
+      // Echo RAM mirrors work RAM
+      ECHO_RAM_START..ECHO_RAM_END => {
+        self.memory[(INTERNAL_RAM_START + (address - ECHO_RAM_START)) as usize]
+      }
+      // Sprite memory
+      OAM_START..OAM_END => self.memory[address as usize],
+      // Unused, map to 0xFF
+      UNUSED_START..UNUSED_END => 0xFF,
       // I/O Registers
-      0xFF00..0xFF80 => self.io_registers.read_byte(address),
+      // TODO: Research and impl properly
+      IO_START..IO_END => self.memory[address as usize],
       // High RAM
-      0xFF80..0xFFFF => self.hram[(address - 0xFF80) as usize],
-      // Interrupt enable register
-      0xFFFF => self.interrupt_enable,
-      // Unmapped memory
-      _ => 0xFF,
+      HIGH_RAM_START..HIGH_RAM_END => self.memory[address as usize],
+      // Interrupt register
+      INTERRUPT_ENABLE_REGISTER => self.memory[address as usize],
     }
   }
 
@@ -81,53 +124,29 @@ impl Mmu {
   pub fn write_byte(&mut self, address: u16, value: u8) {
     match address {
       // ROM
-      0x0000..0x8000 => self.mbc.write_rom(address, value),
-      // Working RAM
-      0xC000..0xE000 => self.ram[(address - 0xC000) as usize] = value,
-      // Echo of working RAM
-      0xE000..0xFE00 => self.ram[(address - 0xE000) as usize] = value,
+      ROM_BANK_0_START..ROM_BANK_0_END => self.mbc.write_rom(address, value),
+      // Switchable ROM bank
+      ROM_BANK_N_START..ROM_BANK_N_END => self.mbc.write_rom(address, value),
+      // Video RAM
+      VIDEO_RAM_START..VIDEO_RAM_END => self.memory[address as usize] = value,
+      // Cartridge RAM
+      EXTERNAL_RAM_START..EXTERNAL_RAM_END => self.memory[address as usize] = value,
+      // Work RAM
+      INTERNAL_RAM_START..INTERNAL_RAM_END => self.memory[address as usize] = value,
+      // Echo RAM mirrors work RAM
+      ECHO_RAM_START..ECHO_RAM_END => {
+        self.memory[(INTERNAL_RAM_START + (address - ECHO_RAM_START)) as usize] = value
+      }
+      // Sprite memory
+      OAM_START..OAM_END => self.memory[address as usize] = value,
+      // Unused, map to 0xFF
+      UNUSED_START..UNUSED_END => {}
       // I/O Registers
-      0xFF00..0xFF90 => self.io_registers.write_byte(address, value),
+      IO_START..IO_END => self.memory[address as usize] = value,
       // High RAM
-      0xFF80..0xFFFF => self.hram[(address - 0xFF80) as usize] = value,
-      // Interrupt enable
-      0xFFFF => self.interrupt_enable = value,
-      // Unwritable regions
-      _ => {}
-    }
-  }
-}
-
-impl IoRegisters {
-  pub fn new() -> Self {
-    Self {
-      joypad: 0xFF,
-      timer: [0; 4],
-      interrupt_flag: 0,
-      lcd: [0; 12],
-    }
-  }
-
-  pub fn read_byte(&self, address: u16) -> u8 {
-    match address {
-      // Set the unused bits
-      0xFF00 => self.joypad | 0xCF,
-      0xFF04..0xFF08 => self.timer[(address - 0xFF04) as usize],
-      0xFF0F => self.interrupt_flag,
-      0xFF40..0xFF4C => self.lcd[(address - 0xFF40) as usize],
-      _ => 0xFF,
-    }
-  }
-  pub fn write_byte(&mut self, address: u16, value: u8) {
-    match address {
-      // Make sure that only bits 4 and 5 can be written to
-      0xFF00 => self.joypad = value & 0b110000,
-      0xFF04 => self.timer[0] = 0,
-      0xFF05..0xFF08 => self.timer[(address - 0xFF04) as usize] = value,
-      // Only the first 5 LSB are valid
-      0xFF0F => self.interrupt_flag = value & 0b11111,
-      0xFF40..0xFF4C => self.lcd[(address - 0xFF40) as usize] = value,
-      _ => {}
+      HIGH_RAM_START..HIGH_RAM_END => self.memory[address as usize] = value,
+      // Interrupt register
+      INTERRUPT_ENABLE_REGISTER => self.memory[address as usize] = value,
     }
   }
 }
