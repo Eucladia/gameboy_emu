@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use crate::memory::{Mbc0, MemoryBankController};
+use crate::memory::{Cartridge, Mbc0};
 
 /// The starting address for ROM bank 0.
 pub const ROM_BANK_0_START: u16 = 0;
@@ -63,21 +63,21 @@ const CARTRIDGE_TYPE: u16 = 0x147;
 pub struct Mmu {
   /// The available memory to work with.
   memory: [u8; u16::MAX as usize + 1],
-  /// The memory bank controller this cartridge uses.
-  mbc: MemoryBankController,
+  /// The cartridge.
+  cartridge: Cartridge,
 }
 
 impl Mmu {
   /// Creates a new memory manager.
   pub fn new(cartridge: Vec<u8>) -> Self {
     let mbc = match cartridge[CARTRIDGE_TYPE as usize] {
-      0 => MemoryBankController::Zero(Mbc0::new(cartridge)),
+      0 => Cartridge::Zero(Mbc0::new(cartridge)),
       b => panic!("got invalid memory cartridge type: {b:02X}"),
     };
 
     Self {
       memory: [0; u16::MAX as usize + 1],
-      mbc,
+      cartridge: mbc,
     }
   }
 
@@ -85,9 +85,9 @@ impl Mmu {
   pub fn read_byte(&self, address: u16) -> u8 {
     match address {
       // ROM
-      ROM_BANK_0_START..ROM_BANK_0_END => self.mbc.read_rom(address),
+      ROM_BANK_0_START..ROM_BANK_0_END => self.cartridge.read_rom(address),
       // Switchable ROM bank
-      ROM_BANK_N_START..ROM_BANK_N_END => self.mbc.read_rom(address),
+      ROM_BANK_N_START..ROM_BANK_N_END => self.cartridge.read_rom(address),
       // Video RAM
       VIDEO_RAM_START..VIDEO_RAM_END => self.memory[address as usize],
       // Cartridge RAM
@@ -124,9 +124,9 @@ impl Mmu {
   pub fn write_byte(&mut self, address: u16, value: u8) {
     match address {
       // ROM
-      ROM_BANK_0_START..ROM_BANK_0_END => self.mbc.write_rom(address, value),
+      ROM_BANK_0_START..ROM_BANK_0_END => self.cartridge.write_rom(address, value),
       // Switchable ROM bank
-      ROM_BANK_N_START..ROM_BANK_N_END => self.mbc.write_rom(address, value),
+      ROM_BANK_N_START..ROM_BANK_N_END => self.cartridge.write_rom(address, value),
       // Video RAM
       VIDEO_RAM_START..VIDEO_RAM_END => self.memory[address as usize] = value,
       // Cartridge RAM
