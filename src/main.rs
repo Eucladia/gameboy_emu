@@ -1,9 +1,12 @@
+mod addresses;
 mod cartridge_header;
 mod cpu;
 mod emulator;
 mod error;
 mod flags;
+mod hardware;
 mod instructions;
+mod joypad;
 mod memory;
 mod registers;
 

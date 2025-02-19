@@ -1,7 +1,7 @@
 use crate::{
   flags::{ConditionalFlag, Flags},
+  hardware::Hardware,
   instructions::{Instruction, Operand},
-  memory::Mmu,
   registers::{Register, RegisterPair, Registers},
 };
 
@@ -31,7 +31,7 @@ struct ClockState {
 }
 
 impl Cpu {
-  pub fn new(mmu: Mmu) -> Self {
+  pub fn new() -> Self {
     Self {
       flags: 0,
       master_interrupt_enabled: false,
@@ -43,34 +43,34 @@ impl Cpu {
   }
 
   /// Executes one cycle.
-  pub fn step(&mut self, mmu: &mut Mmu) {
-    let byte = self.fetch_instruction(mmu);
+  pub fn step(&mut self, hardware: &mut Hardware) {
+    let byte = self.fetch_instruction(hardware);
 
     self.registers.pc = self.registers.pc.wrapping_add(1);
     self.registers.ir = byte;
 
-    let instruction = self.decode_instruction(byte, mmu);
+    let instruction = self.decode_instruction(byte, hardware);
     // Subtract a byte since we accounted for the instruction byte itself already
     let i_size = instruction.bytes_occupied() - 1;
 
     self.registers.pc = self.registers.pc.wrapping_add(i_size as u16);
 
-    self.execute_instruction(mmu, &instruction);
+    self.execute_instruction(hardware, &instruction);
   }
 
   /// Fetches the next instruction byte.
-  pub fn fetch_instruction(&self, mmu: &Mmu) -> u8 {
-    mmu.read_byte(self.registers.pc)
+  pub fn fetch_instruction(&self, hardware: &Hardware) -> u8 {
+    hardware.read_byte(self.registers.pc)
   }
 
   /// Executes the [`Instruction`], updating the internal clock state.
-  pub fn execute_instruction(&mut self, mmu: &mut Mmu, instruction: &Instruction) {
+  pub fn execute_instruction(&mut self, hardware: &mut Hardware, instruction: &Instruction) {
     use Instruction::*;
 
     match instruction {
       LD(Operand::Register(dest), Operand::Register(src)) => {
-        let value = self.read_register(mmu, *src);
-        self.write_register(mmu, *dest, value);
+        let value = self.read_register(hardware, *src);
+        self.write_register(hardware, *dest, value);
         self.clock.tick();
 
         // Add another machine cycle if we fetched or wrote to memory
@@ -83,20 +83,20 @@ impl Cpu {
         self.clock.advance(3);
       }
       LD(Operand::RegisterPairMemory(rp), Operand::Register(Register::A)) => {
-        mmu.write_byte(self.read_register_pair(*rp), self.registers.a);
+        hardware.write_byte(self.read_register_pair(*rp), self.registers.a);
         self.clock.advance(2);
       }
       LD(Operand::Register(Register::A), Operand::RegisterPairMemory(rp)) => {
-        self.registers.a = mmu.read_byte(self.read_register_pair(*rp));
+        self.registers.a = hardware.read_byte(self.read_register_pair(*rp));
         self.clock.advance(2);
       }
       LD(Operand::MemoryAddress(value), Operand::RegisterPair(RegisterPair::SP)) => {
-        mmu.write_byte(*value, (self.registers.sp & 0xFF) as u8);
-        mmu.write_byte(*value + 1, ((self.registers.sp >> 8) & 0xFF) as u8);
+        hardware.write_byte(*value, (self.registers.sp & 0xFF) as u8);
+        hardware.write_byte(*value + 1, ((self.registers.sp >> 8) & 0xFF) as u8);
         self.clock.advance(5);
       }
       LD(Operand::Register(dest), Operand::Byte(value)) => {
-        self.write_register(mmu, *dest, *value);
+        self.write_register(hardware, *dest, *value);
         self.clock.advance(2);
 
         // Add another machine cycle if we wrote to memory
@@ -114,18 +114,18 @@ impl Cpu {
         self.clock.advance(2);
       }
       LD(Operand::MemoryAddress(address), Operand::Register(Register::A)) => {
-        mmu.write_byte(*address, self.registers.a);
+        hardware.write_byte(*address, self.registers.a);
         self.clock.advance(4);
       }
       LD(Operand::Register(Register::A), Operand::MemoryAddress(address)) => {
-        self.registers.a = mmu.read_byte(*address);
+        self.registers.a = hardware.read_byte(*address);
         self.clock.advance(4);
       }
 
       LDI(Operand::RegisterPairMemory(RegisterPair::HL), Operand::Register(Register::A)) => {
         let address = ((self.registers.h as u16) << 8) | self.registers.l as u16;
 
-        mmu.write_byte(address, self.registers.a);
+        hardware.write_byte(address, self.registers.a);
 
         let inc = address.wrapping_add(1);
 
@@ -136,7 +136,7 @@ impl Cpu {
       }
       LDI(Operand::Register(Register::A), Operand::RegisterPairMemory(RegisterPair::HL)) => {
         let address = ((self.registers.h as u16) << 8) | self.registers.l as u16;
-        let value = mmu.read_byte(address);
+        let value = hardware.read_byte(address);
 
         self.registers.a = value;
 
@@ -150,7 +150,7 @@ impl Cpu {
       LDD(Operand::RegisterPairMemory(RegisterPair::HL), Operand::Register(Register::A)) => {
         let address = ((self.registers.h as u16) << 8) | self.registers.l as u16;
 
-        mmu.write_byte(address, self.registers.a);
+        hardware.write_byte(address, self.registers.a);
 
         let inc = address.wrapping_sub(1);
 
@@ -161,7 +161,7 @@ impl Cpu {
       }
       LDD(Operand::Register(Register::A), Operand::RegisterPairMemory(RegisterPair::HL)) => {
         let address = ((self.registers.h as u16) << 8) | self.registers.l as u16;
-        let value = mmu.read_byte(address);
+        let value = hardware.read_byte(address);
 
         self.registers.a = value;
 
@@ -173,25 +173,25 @@ impl Cpu {
         self.clock.advance(2);
       }
       LDH(Operand::HighMemoryByte(value), Operand::Register(Register::A)) => {
-        mmu.write_byte(0xFF00 + *value as u16, self.registers.a);
+        hardware.write_byte(0xFF00 + *value as u16, self.registers.a);
         self.clock.advance(3);
       }
       LDH(Operand::Register(Register::A), Operand::HighMemoryByte(value)) => {
-        self.registers.a = mmu.read_byte(0xFF00 + *value as u16);
+        self.registers.a = hardware.read_byte(0xFF00 + *value as u16);
         self.clock.advance(3);
       }
       LDH(Operand::HighMemoryRegister(Register::C), Operand::Register(Register::A)) => {
-        mmu.write_byte(0xFF00 + self.registers.c as u16, self.registers.a);
+        hardware.write_byte(0xFF00 + self.registers.c as u16, self.registers.a);
         self.clock.advance(2);
       }
       LDH(Operand::Register(Register::A), Operand::HighMemoryRegister(Register::C)) => {
-        self.registers.a = mmu.read_byte(0xFF00 + self.registers.c as u16);
+        self.registers.a = hardware.read_byte(0xFF00 + self.registers.c as u16);
         self.clock.advance(2);
       }
 
       ADC(Operand::Register(Register::A), Operand::Register(src)) => {
         let is_carry_set = self.is_flag_set(Flags::C);
-        let reg_value = self.read_register(mmu, *src);
+        let reg_value = self.read_register(hardware, *src);
         let res = self
           .registers
           .a
@@ -242,7 +242,7 @@ impl Cpu {
         self.clock.advance(2);
       }
       ADD(Operand::Register(Register::A), Operand::Register(src)) => {
-        let reg_value = self.read_register(mmu, *src);
+        let reg_value = self.read_register(hardware, *src);
         let res = self.registers.a.wrapping_add(reg_value);
 
         self.registers.a = res;
@@ -309,7 +309,7 @@ impl Cpu {
         self.clock.advance(4);
       }
       AND(Operand::Register(Register::A), Operand::Register(src_reg)) => {
-        let src_value = self.read_register(mmu, *src_reg);
+        let src_value = self.read_register(hardware, *src_reg);
         let res = self.registers.a & src_value;
 
         self.registers.a = res;
@@ -339,7 +339,7 @@ impl Cpu {
         self.clock.advance(2);
       }
       CP(Operand::Register(Register::A), Operand::Register(src_reg)) => {
-        let src_value = self.read_register(mmu, *src_reg);
+        let src_value = self.read_register(hardware, *src_reg);
         let res = self.registers.a.wrapping_sub(src_value);
 
         self.clock.tick();
@@ -365,10 +365,10 @@ impl Cpu {
         self.clock.advance(2);
       }
       DEC(Operand::Register(reg)) => {
-        let reg_value = self.read_register(mmu, *reg);
+        let reg_value = self.read_register(hardware, *reg);
         let res = reg_value.wrapping_sub(1);
 
-        self.write_register(mmu, *reg, res);
+        self.write_register(hardware, *reg, res);
 
         self.toggle_flag(Flags::Z, res == 0);
         self.toggle_flag(Flags::N, true);
@@ -389,10 +389,10 @@ impl Cpu {
         self.clock.advance(2);
       }
       INC(Operand::Register(reg)) => {
-        let reg_value = self.read_register(mmu, *reg);
+        let reg_value = self.read_register(hardware, *reg);
         let res = reg_value.wrapping_add(1);
 
-        self.write_register(mmu, *reg, res);
+        self.write_register(hardware, *reg, res);
 
         self.toggle_flag(Flags::Z, res == 0);
         self.toggle_flag(Flags::N, false);
@@ -413,7 +413,7 @@ impl Cpu {
         self.clock.advance(2);
       }
       OR(Operand::Register(Register::A), Operand::Register(reg)) => {
-        let reg_value = self.read_register(mmu, *reg);
+        let reg_value = self.read_register(hardware, *reg);
         let res = self.registers.a | reg_value;
 
         self.registers.a = res;
@@ -444,7 +444,7 @@ impl Cpu {
       }
       SBC(Operand::Register(Register::A), Operand::Register(reg)) => {
         let is_carry_set = self.is_flag_set(Flags::C) as u8;
-        let reg_value = self.read_register(mmu, *reg);
+        let reg_value = self.read_register(hardware, *reg);
         let a_value = self.registers.a;
         let res = a_value.wrapping_sub(reg_value).wrapping_sub(is_carry_set);
 
@@ -489,7 +489,7 @@ impl Cpu {
         self.clock.advance(2);
       }
       SUB(Operand::Register(Register::A), Operand::Register(reg)) => {
-        let reg_value = self.read_register(mmu, *reg);
+        let reg_value = self.read_register(hardware, *reg);
         let a_value = self.registers.a;
         let res = a_value.wrapping_sub(reg_value);
 
@@ -521,7 +521,7 @@ impl Cpu {
         self.clock.advance(2);
       }
       XOR(Operand::Register(Register::A), Operand::Register(reg)) => {
-        let reg_value = self.read_register(mmu, *reg);
+        let reg_value = self.read_register(hardware, *reg);
         let res = self.registers.a ^ reg_value;
 
         self.registers.a = res;
@@ -590,8 +590,8 @@ impl Cpu {
           let upper = ((self.registers.pc >> 8) & 0xFF) as u8;
           let lower = (self.registers.pc & 0xFF) as u8;
 
-          mmu.write_byte(self.registers.sp - 1, upper);
-          mmu.write_byte(self.registers.sp - 2, lower);
+          hardware.write_byte(self.registers.sp - 1, upper);
+          hardware.write_byte(self.registers.sp - 2, lower);
 
           self.registers.pc = *address;
           self.registers.sp -= 2;
@@ -604,8 +604,8 @@ impl Cpu {
         let upper = ((self.registers.pc >> 8) & 0xFF) as u8;
         let lower = (self.registers.pc & 0xFF) as u8;
 
-        mmu.write_byte(self.registers.sp - 1, upper);
-        mmu.write_byte(self.registers.sp - 2, lower);
+        hardware.write_byte(self.registers.sp - 1, upper);
+        hardware.write_byte(self.registers.sp - 2, lower);
 
         self.registers.pc = *address;
         self.registers.sp -= 2;
@@ -651,8 +651,8 @@ impl Cpu {
         let should_jump = self.is_conditional_flag_set(*flag);
 
         if should_jump {
-          let lower = mmu.read_byte(self.registers.sp);
-          let upper = mmu.read_byte(self.registers.sp + 1);
+          let lower = hardware.read_byte(self.registers.sp);
+          let upper = hardware.read_byte(self.registers.sp + 1);
 
           self.registers.pc = ((upper as u16) << 8) | lower as u16;
           self.registers.sp = self.registers.sp.wrapping_add(2);
@@ -662,16 +662,16 @@ impl Cpu {
         }
       }
       RET(None) => {
-        let lower = mmu.read_byte(self.registers.sp);
-        let upper = mmu.read_byte(self.registers.sp + 1);
+        let lower = hardware.read_byte(self.registers.sp);
+        let upper = hardware.read_byte(self.registers.sp + 1);
 
         self.registers.pc = ((upper as u16) << 8) | lower as u16;
         self.registers.sp = self.registers.sp.wrapping_add(2);
         self.clock.advance(4);
       }
       RETI => {
-        let lower = mmu.read_byte(self.registers.sp);
-        let upper = mmu.read_byte(self.registers.sp + 1);
+        let lower = hardware.read_byte(self.registers.sp);
+        let upper = hardware.read_byte(self.registers.sp + 1);
 
         self.registers.pc = ((upper as u16) << 8) | lower as u16;
         self.registers.sp = self.registers.sp.wrapping_add(2);
@@ -682,8 +682,8 @@ impl Cpu {
         let upper = ((self.registers.pc >> 8) & 0xFF) as u8;
         let lower = (self.registers.pc & 0xFF) as u8;
 
-        mmu.write_byte(self.registers.sp - 1, upper);
-        mmu.write_byte(self.registers.sp - 2, lower);
+        hardware.write_byte(self.registers.sp - 1, upper);
+        hardware.write_byte(self.registers.sp - 2, lower);
 
         self.registers.h = 0;
         self.registers.l = *target;
@@ -703,8 +703,8 @@ impl Cpu {
       }
 
       POP(Operand::RegisterPair(rp)) => {
-        let lower = mmu.read_byte(self.registers.sp);
-        let upper = mmu.read_byte(self.registers.sp + 1);
+        let lower = hardware.read_byte(self.registers.sp);
+        let upper = hardware.read_byte(self.registers.sp + 1);
         let value = ((upper as u16) << 8) | lower as u16;
 
         self.write_register_pair(*rp, value);
@@ -717,8 +717,8 @@ impl Cpu {
         let upper = ((reg_value >> 8) & 0xFF) as u8;
         let lower = (reg_value & 0xFF) as u8;
 
-        mmu.write_byte(self.registers.sp - 1, upper);
-        mmu.write_byte(self.registers.sp - 2, lower);
+        hardware.write_byte(self.registers.sp - 1, upper);
+        hardware.write_byte(self.registers.sp - 2, lower);
 
         self.registers.sp -= 2;
         self.clock.advance(4);
@@ -810,7 +810,7 @@ impl Cpu {
       }
 
       BIT(Operand::Byte(bit), Operand::Register(reg)) => {
-        let reg_value = self.read_register(mmu, *reg);
+        let reg_value = self.read_register(hardware, *reg);
         let extracted_bit = (reg_value >> bit) & 1;
 
         self.toggle_flag(Flags::Z, extracted_bit == 0);
@@ -825,10 +825,10 @@ impl Cpu {
         }
       }
       RES(Operand::Byte(bit), Operand::Register(reg)) => {
-        let reg_value = self.read_register(mmu, *reg);
+        let reg_value = self.read_register(hardware, *reg);
         let new_value = reg_value & !(1 << bit);
 
-        self.write_register(mmu, *reg, new_value);
+        self.write_register(hardware, *reg, new_value);
         self.clock.advance(2);
 
         // Advance 2 machine cycles since we fetched and wrote to memory
@@ -837,10 +837,10 @@ impl Cpu {
         }
       }
       SET(Operand::Byte(bit), Operand::Register(reg)) => {
-        let reg_value = self.read_register(mmu, *reg);
+        let reg_value = self.read_register(hardware, *reg);
         let new_value = reg_value | (1 << bit);
 
-        self.write_register(mmu, *reg, new_value);
+        self.write_register(hardware, *reg, new_value);
         self.clock.advance(2);
 
         if matches!(reg, Register::M) {
@@ -848,11 +848,11 @@ impl Cpu {
         }
       }
       RL(Operand::Register(reg)) => {
-        let reg_value = self.read_register(mmu, *reg);
+        let reg_value = self.read_register(hardware, *reg);
         let is_carry_set = self.is_flag_set(Flags::C) as u8;
         let res = (reg_value << 1) | is_carry_set;
 
-        self.write_register(mmu, *reg, res);
+        self.write_register(hardware, *reg, res);
 
         self.toggle_flag(Flags::Z, res == 0);
         self.toggle_flag(Flags::N, false);
@@ -867,10 +867,10 @@ impl Cpu {
         }
       }
       RLC(Operand::Register(reg)) => {
-        let reg_value = self.read_register(mmu, *reg);
+        let reg_value = self.read_register(hardware, *reg);
         let res = reg_value.rotate_left(1);
 
-        self.write_register(mmu, *reg, res);
+        self.write_register(hardware, *reg, res);
 
         self.toggle_flag(Flags::Z, res == 0);
         self.toggle_flag(Flags::N, false);
@@ -885,11 +885,11 @@ impl Cpu {
         }
       }
       RR(Operand::Register(reg)) => {
-        let reg_value = self.read_register(mmu, *reg);
+        let reg_value = self.read_register(hardware, *reg);
         let is_carry_set = self.is_flag_set(Flags::C) as u8;
         let res = (reg_value >> 1) | (is_carry_set << 7);
 
-        self.write_register(mmu, *reg, res);
+        self.write_register(hardware, *reg, res);
 
         self.toggle_flag(Flags::Z, res == 0);
         self.toggle_flag(Flags::N, false);
@@ -904,10 +904,10 @@ impl Cpu {
         }
       }
       RRC(Operand::Register(reg)) => {
-        let reg_value = self.read_register(mmu, *reg);
+        let reg_value = self.read_register(hardware, *reg);
         let res = reg_value.rotate_right(1);
 
-        self.write_register(mmu, *reg, res);
+        self.write_register(hardware, *reg, res);
 
         self.toggle_flag(Flags::Z, res == 0);
         self.toggle_flag(Flags::N, false);
@@ -922,10 +922,10 @@ impl Cpu {
         }
       }
       SLA(Operand::Register(reg)) => {
-        let reg_value = self.read_register(mmu, *reg);
+        let reg_value = self.read_register(hardware, *reg);
         let res = reg_value << 1;
 
-        self.write_register(mmu, *reg, res);
+        self.write_register(hardware, *reg, res);
 
         self.toggle_flag(Flags::Z, res == 0);
         self.toggle_flag(Flags::N, false);
@@ -940,11 +940,11 @@ impl Cpu {
         }
       }
       SRA(Operand::Register(reg)) => {
-        let reg_value = self.read_register(mmu, *reg);
+        let reg_value = self.read_register(hardware, *reg);
         // SRA preserves the sign bit (MSB)
         let res = (reg_value >> 1) | (reg_value & 0x80);
 
-        self.write_register(mmu, *reg, res);
+        self.write_register(hardware, *reg, res);
 
         self.toggle_flag(Flags::Z, res == 0);
         self.toggle_flag(Flags::N, false);
@@ -959,10 +959,10 @@ impl Cpu {
         }
       }
       SRL(Operand::Register(reg)) => {
-        let reg_value = self.read_register(mmu, *reg);
+        let reg_value = self.read_register(hardware, *reg);
         let res = reg_value >> 1;
 
-        self.write_register(mmu, *reg, res);
+        self.write_register(hardware, *reg, res);
 
         self.toggle_flag(Flags::Z, res == 0);
         self.toggle_flag(Flags::N, false);
@@ -977,12 +977,12 @@ impl Cpu {
         }
       }
       SWAP(Operand::Register(reg)) => {
-        let reg_value = self.read_register(mmu, *reg);
+        let reg_value = self.read_register(hardware, *reg);
         let lower = reg_value & 0x0F;
         let upper = reg_value & 0xF0;
         let res = (lower << 4) | (upper >> 4);
 
-        self.write_register(mmu, *reg, res);
+        self.write_register(hardware, *reg, res);
 
         self.toggle_flag(Flags::Z, res == 0);
         self.toggle_flag(Flags::N, false);
@@ -1001,7 +1001,7 @@ impl Cpu {
   }
 
   /// Decodes a byte into an [`Instruction`].
-  pub fn decode_instruction(&self, byte: u8, mmu: &Mmu) -> Instruction {
+  pub fn decode_instruction(&self, byte: u8, hardware: &Hardware) -> Instruction {
     match byte {
       // LD r8, r8
       0x40..0x76 | 0x77..=0x7F => {
@@ -1013,7 +1013,7 @@ impl Cpu {
       // LD r16, n16
       0x01 | 0x11 | 0x21 | 0x31 => {
         let r16 = RegisterPair::from_bits((byte >> 4) & 0b11, false).unwrap();
-        let n16 = mmu.read_word(self.registers.pc);
+        let n16 = hardware.read_word(self.registers.pc);
 
         Instruction::LD(Operand::RegisterPair(r16), Operand::Word(n16))
       }
@@ -1045,7 +1045,7 @@ impl Cpu {
       }
       // LD [a16], SP
       0x08 => {
-        let n16 = mmu.read_word(self.registers.pc);
+        let n16 = hardware.read_word(self.registers.pc);
 
         Instruction::LD(
           Operand::MemoryAddress(n16),
@@ -1055,13 +1055,13 @@ impl Cpu {
       // LD r8 | [HL], n8
       0x06 | 0x16 | 0x26 | 0x36 | 0x0E | 0x1E | 0x2E | 0x3E => {
         let dest_reg = Register::from_bits((byte >> 3) & 0b111).unwrap();
-        let n8 = mmu.read_byte(self.registers.pc);
+        let n8 = hardware.read_byte(self.registers.pc);
 
         Instruction::LD(Operand::Register(dest_reg), Operand::Byte(n8))
       }
       // LD HL, SP + n8
       0xF8 => {
-        let n8 = mmu.read_byte(self.registers.pc);
+        let n8 = hardware.read_byte(self.registers.pc);
 
         Instruction::LD(
           Operand::RegisterPair(RegisterPair::HL),
@@ -1075,13 +1075,13 @@ impl Cpu {
       ),
       // LD [n16], A
       0xEA => {
-        let n16 = mmu.read_word(self.registers.pc);
+        let n16 = hardware.read_word(self.registers.pc);
 
         Instruction::LD(Operand::MemoryAddress(n16), Operand::Register(Register::A))
       }
       // LD A, [n16]
       0xFA => {
-        let n16 = mmu.read_word(self.registers.pc);
+        let n16 = hardware.read_word(self.registers.pc);
 
         Instruction::LD(Operand::Register(Register::A), Operand::MemoryAddress(n16))
       }
@@ -1107,13 +1107,13 @@ impl Cpu {
       ),
       // LDH [0xFF00 + n8], A
       0xE0 => {
-        let n8 = mmu.read_byte(self.registers.pc);
+        let n8 = hardware.read_byte(self.registers.pc);
 
         Instruction::LDH(Operand::HighMemoryByte(n8), Operand::Register(Register::A))
       }
       // LDH A, [0xFF00 + n8]
       0xF0 => {
-        let n8 = mmu.read_byte(self.registers.pc);
+        let n8 = hardware.read_byte(self.registers.pc);
 
         Instruction::LDH(Operand::Register(Register::A), Operand::HighMemoryByte(n8))
       }
@@ -1135,7 +1135,7 @@ impl Cpu {
       }
       // ADC A, n8
       0xCE => {
-        let n8 = mmu.read_byte(self.registers.pc);
+        let n8 = hardware.read_byte(self.registers.pc);
 
         Instruction::ADC(Operand::Register(Register::A), Operand::Byte(n8))
       }
@@ -1147,7 +1147,7 @@ impl Cpu {
       }
       // ADD A, n8
       0xC6 => {
-        let n8 = mmu.read_byte(self.registers.pc);
+        let n8 = hardware.read_byte(self.registers.pc);
 
         Instruction::ADD(Operand::Register(Register::A), Operand::Byte(n8))
       }
@@ -1162,7 +1162,7 @@ impl Cpu {
       }
       // ADD SP, n8
       0xE8 => {
-        let n8 = mmu.read_byte(self.registers.pc);
+        let n8 = hardware.read_byte(self.registers.pc);
 
         Instruction::ADD(Operand::RegisterPair(RegisterPair::SP), Operand::Byte(n8))
       }
@@ -1174,7 +1174,7 @@ impl Cpu {
       }
       // AND A, n8
       0xE6 => {
-        let n8 = mmu.read_byte(self.registers.pc);
+        let n8 = hardware.read_byte(self.registers.pc);
 
         Instruction::AND(Operand::Register(Register::A), Operand::Byte(n8))
       }
@@ -1186,7 +1186,7 @@ impl Cpu {
       }
       // CP A, n8
       0xFE => {
-        let n8 = mmu.read_byte(self.registers.pc);
+        let n8 = hardware.read_byte(self.registers.pc);
 
         Instruction::CP(Operand::Register(Register::A), Operand::Byte(n8))
       }
@@ -1222,7 +1222,7 @@ impl Cpu {
       }
       // OR A, n8
       0xF6 => {
-        let n8 = mmu.read_byte(self.registers.pc);
+        let n8 = hardware.read_byte(self.registers.pc);
 
         Instruction::OR(Operand::Register(Register::A), Operand::Byte(n8))
       }
@@ -1234,7 +1234,7 @@ impl Cpu {
       }
       // SBC A, n8
       0xDE => {
-        let n8 = mmu.read_byte(self.registers.pc);
+        let n8 = hardware.read_byte(self.registers.pc);
 
         Instruction::SBC(Operand::Register(Register::A), Operand::Byte(n8))
       }
@@ -1246,7 +1246,7 @@ impl Cpu {
       }
       // SUB A, n8
       0xD6 => {
-        let n8 = mmu.read_byte(self.registers.pc);
+        let n8 = hardware.read_byte(self.registers.pc);
 
         Instruction::SUB(Operand::Register(Register::A), Operand::Byte(n8))
       }
@@ -1258,7 +1258,7 @@ impl Cpu {
       }
       // XOR A, n8
       0xEE => {
-        let n8 = mmu.read_byte(self.registers.pc);
+        let n8 = hardware.read_byte(self.registers.pc);
 
         Instruction::XOR(Operand::Register(Register::A), Operand::Byte(n8))
       }
@@ -1268,26 +1268,26 @@ impl Cpu {
       // CALL cf, n16
       0xC4 | 0xD4 | 0xCC | 0xDC => {
         let cond_flag = ConditionalFlag::from_bits((byte >> 3) & 0b11).unwrap();
-        let n16 = mmu.read_word(self.registers.pc);
+        let n16 = hardware.read_word(self.registers.pc);
 
         Instruction::CALL(Some(Operand::Conditional(cond_flag)), Operand::Word(n16))
       }
       // CALL n16
       0xCD => {
-        let n16 = mmu.read_word(self.registers.pc);
+        let n16 = hardware.read_word(self.registers.pc);
 
         Instruction::CALL(None, Operand::Word(n16))
       }
       // JP cf, n16
       0xC2 | 0xD2 | 0xCA | 0xDA => {
         let cond_flag = ConditionalFlag::from_bits((byte >> 3) & 0b11).unwrap();
-        let n16 = mmu.read_word(self.registers.pc);
+        let n16 = hardware.read_word(self.registers.pc);
 
         Instruction::JP(Some(Operand::Conditional(cond_flag)), Operand::Word(n16))
       }
       // JP n16
       0xC3 => {
-        let n16 = mmu.read_word(self.registers.pc);
+        let n16 = hardware.read_word(self.registers.pc);
 
         Instruction::JP(None, Operand::Word(n16))
       }
@@ -1296,13 +1296,13 @@ impl Cpu {
       // JR cf, n16
       0x20 | 0x30 | 0x28 | 0x38 => {
         let cond_flag = ConditionalFlag::from_bits((byte >> 3) & 0b11).unwrap();
-        let n16 = mmu.read_word(self.registers.pc);
+        let n16 = hardware.read_word(self.registers.pc);
 
         Instruction::JR(Some(Operand::Conditional(cond_flag)), Operand::Word(n16))
       }
       // JR n8
       0x18 => {
-        let n8 = mmu.read_byte(self.registers.pc);
+        let n8 = hardware.read_byte(self.registers.pc);
 
         Instruction::JR(None, Operand::Byte(n8))
       }
@@ -1326,7 +1326,7 @@ impl Cpu {
       // STOP n8
       0x10 => {
         // NOTE: `STOP` needs to be followed by another byte.
-        let n8 = mmu.read_byte(self.registers.pc);
+        let n8 = hardware.read_byte(self.registers.pc);
 
         Instruction::STOP(Operand::Byte(n8))
       }
@@ -1370,7 +1370,7 @@ impl Cpu {
 
       // Extended instruction set
       0xCB => {
-        let next_byte = mmu.read_byte(self.registers.pc);
+        let next_byte = hardware.read_byte(self.registers.pc);
 
         match next_byte {
           // BIT 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7, r8 | [HL]
@@ -1451,7 +1451,7 @@ impl Cpu {
   }
 
   /// Reads the value of the [`Register`].
-  fn read_register(&self, mmu: &Mmu, register: Register) -> u8 {
+  fn read_register(&self, hardware: &Hardware, register: Register) -> u8 {
     match register {
       Register::A => self.registers.a,
       Register::B => self.registers.b,
@@ -1463,13 +1463,13 @@ impl Cpu {
       Register::M => {
         let address = (self.registers.h as u16) << 8 | self.registers.l as u16;
 
-        mmu.read_byte(address)
+        hardware.read_byte(address)
       }
     }
   }
 
   /// Writes the value to the [`Register`].
-  fn write_register(&mut self, mmu: &mut Mmu, register: Register, value: u8) {
+  fn write_register(&mut self, hardware: &mut Hardware, register: Register, value: u8) {
     match register {
       Register::A => self.registers.a = value,
       Register::B => self.registers.a = value,
@@ -1481,7 +1481,7 @@ impl Cpu {
       Register::M => {
         let address = (self.registers.h as u16) << 8 | self.registers.l as u16;
 
-        mmu.write_byte(address, value);
+        hardware.write_byte(address, value);
       }
     }
   }

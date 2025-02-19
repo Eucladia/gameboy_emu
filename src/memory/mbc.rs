@@ -7,15 +7,34 @@ pub enum Cartridge {
 }
 
 impl Cartridge {
+  /// Reads the value specified by the address in ROM.
   pub fn read_rom(&self, address: u16) -> u8 {
     match self {
       Cartridge::Zero(mbc) => mbc.read_rom(address),
     }
   }
 
-  pub fn write_rom(&mut self, address: u16, value: u8) {
+  /// Writes the value to the address in ROM.
+  pub fn write_rom(&self, address: u16, value: u8) {
     match self {
-      Cartridge::Zero(mbc) => mbc.write_rom(address, value),
+      // This cartridge type does not have any ROM
+      Cartridge::Zero(mbc) => {}
+    }
+  }
+
+  /// Reads the value in RAM of the specified address in RAM.
+  pub fn read_ram(&self, address: u16) -> u8 {
+    match self {
+      // This cartridge type does not have any RAM
+      Cartridge::Zero(_) => 0xFF,
+    }
+  }
+
+  /// Writes to the value to address in RAM.
+  pub fn write_ram(&mut self, address: u16, value: u8) {
+    match self {
+      // No-op because this cartridge has no RAM
+      Cartridge::Zero(_) => {}
     }
   }
 }
