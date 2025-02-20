@@ -42,8 +42,8 @@ impl Cpu {
     }
   }
 
-  /// Executes one cycle.
-  pub fn step(&mut self, hardware: &mut Hardware) {
+  /// Executes one cycle, returning the number of T-cycles taken.
+  pub fn step(&mut self, hardware: &mut Hardware) -> usize {
     let byte = self.fetch_instruction(hardware);
 
     self.registers.pc = self.registers.pc.wrapping_add(1);
@@ -55,7 +55,11 @@ impl Cpu {
 
     self.registers.pc = self.registers.pc.wrapping_add(i_size as u16);
 
+    let before = self.clock.t_cycles;
+
     self.execute_instruction(hardware, &instruction);
+
+    self.clock.t_cycles.wrapping_sub(before)
   }
 
   /// Fetches the next instruction byte.
