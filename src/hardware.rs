@@ -8,67 +8,6 @@ pub use joypad::Joypad;
 
 use cartridge::{Cartridge, RomOnly};
 
-/// The starting address for ROM bank 0.
-const ROM_BANK_0_START: u16 = 0;
-/// The ending address for ROM bank 0.
-const ROM_BANK_0_END: u16 = 0x4000;
-/// The starting address for the switchable ROM bank.
-const ROM_BANK_N_START: u16 = 0x4000;
-/// The ending address  for the switchable ROM bank.
-const ROM_BANK_N_END: u16 = 0x8000;
-/// The starting address for VRAM.
-const VIDEO_RAM_START: u16 = 0x8000;
-/// The ending address  for VRAM.
-const VIDEO_RAM_END: u16 = 0xA000;
-/// The starting address for the cartridges RAM.
-const EXTERNAL_RAM_START: u16 = 0xA000;
-/// The ending address for the cartridges  RAM.
-const EXTERNAL_RAM_END: u16 = 0xC000;
-/// The starting address for work RAM.
-const WORK_RAM_START: u16 = 0xC000;
-/// The ending address for work  RAM.
-const WORK_RAM_END: u16 = 0xE000;
-/// The starting address for echo RAM.
-const ECHO_RAM_START: u16 = 0xE000;
-/// The ending address for echo RAM.
-const ECHO_RAM_END: u16 = 0xFE00;
-/// The starting address for the OAM (sprite attribute memory).
-const OAM_START: u16 = 0xFE00;
-/// The ending address for the OAM (sprite attribute memory).
-const OAM_END: u16 = 0xFEA0;
-/// The starting address for unused memory.
-const UNUSED_START: u16 = 0xFEA0;
-/// The ending address for unused memory.
-const UNUSED_END: u16 = 0xFF00;
-/// The starting address for I/O registers.
-const IO_REGISTER_START: u16 = 0xFF00;
-/// The ending address for I/O registers.
-const IO_REGISTER_END: u16 = 0xFF80;
-/// The starting address for HRAM.
-const HIGH_RAM_START: u16 = 0xFF80;
-/// The ending address for HRAM.
-const HIGH_RAM_END: u16 = 0xFFFF;
-/// The interrupt enable register.
-const INTERRUPT_ENABLE_REGISTER: u16 = 0xFFFF;
-
-const VIDEO_RAM_SIZE: u16 = VIDEO_RAM_END - VIDEO_RAM_START;
-const WORK_RAM_SIZE: u16 = WORK_RAM_END - WORK_RAM_START;
-const OAM_SIZE: u16 = OAM_END - OAM_START;
-const HIGH_RAM_SIZE: u16 = HIGH_RAM_END - HIGH_RAM_START;
-const INTERRUPT_ENABLE_REGISTER_SIZE: u16 = 1;
-
-const MEMORY_SIZE: u16 =
-  VIDEO_RAM_SIZE + WORK_RAM_SIZE + OAM_SIZE + HIGH_RAM_SIZE + INTERRUPT_ENABLE_REGISTER_SIZE;
-
-const VIDEO_RAM_OFFSET: u16 = 0;
-const WORK_RAM_OFFSET: u16 = VIDEO_RAM_OFFSET + VIDEO_RAM_SIZE;
-const OAM_OFFSET: u16 = WORK_RAM_OFFSET + WORK_RAM_SIZE;
-const HIGH_RAM_OFFSET: u16 = OAM_OFFSET + OAM_SIZE;
-const INTERRUPT_ENABLE_OFFSET: u16 = HIGH_RAM_OFFSET + HIGH_RAM_SIZE;
-
-const JOYPAD_REGISTER: u16 = 0xFF00;
-const CARTRIDGE_TYPE: u16 = 0x147;
-
 /// The types of interrupts.
 #[derive(Debug, Copy, Clone)]
 #[repr(u8)]
@@ -198,3 +137,66 @@ impl Hardware {
     }
   }
 }
+
+/// The address of the joypad register.
+const JOYPAD_REGISTER: u16 = 0xFF00;
+
+/// The starting address for ROM bank 0.
+const ROM_BANK_0_START: u16 = 0;
+/// The ending address for ROM bank 0.
+const ROM_BANK_0_END: u16 = 0x4000;
+/// The starting address for the switchable ROM bank.
+const ROM_BANK_N_START: u16 = 0x4000;
+/// The ending address  for the switchable ROM bank.
+const ROM_BANK_N_END: u16 = 0x8000;
+/// The starting address for VRAM.
+const VIDEO_RAM_START: u16 = 0x8000;
+/// The ending address  for VRAM.
+const VIDEO_RAM_END: u16 = 0xA000;
+/// The starting address for the cartridges RAM.
+const EXTERNAL_RAM_START: u16 = 0xA000;
+/// The ending address for the cartridges  RAM.
+const EXTERNAL_RAM_END: u16 = 0xC000;
+/// The starting address for work RAM.
+const WORK_RAM_START: u16 = 0xC000;
+/// The ending address for work  RAM.
+const WORK_RAM_END: u16 = 0xE000;
+/// The starting address for echo RAM.
+const ECHO_RAM_START: u16 = 0xE000;
+/// The ending address for echo RAM.
+const ECHO_RAM_END: u16 = 0xFE00;
+/// The starting address for the OAM (sprite attribute memory).
+const OAM_START: u16 = 0xFE00;
+/// The ending address for the OAM (sprite attribute memory).
+const OAM_END: u16 = 0xFEA0;
+/// The starting address for unused memory.
+const UNUSED_START: u16 = 0xFEA0;
+/// The ending address for unused memory.
+const UNUSED_END: u16 = 0xFF00;
+/// The starting address for I/O registers.
+const IO_REGISTER_START: u16 = 0xFF00;
+/// The ending address for I/O registers.
+const IO_REGISTER_END: u16 = 0xFF80;
+/// The starting address for HRAM.
+const HIGH_RAM_START: u16 = 0xFF80;
+/// The ending address for HRAM.
+const HIGH_RAM_END: u16 = 0xFFFF;
+/// The interrupt enable register.
+const INTERRUPT_ENABLE_REGISTER: u16 = 0xFFFF;
+
+const VIDEO_RAM_SIZE: u16 = VIDEO_RAM_END - VIDEO_RAM_START;
+const WORK_RAM_SIZE: u16 = WORK_RAM_END - WORK_RAM_START;
+const OAM_SIZE: u16 = OAM_END - OAM_START;
+const HIGH_RAM_SIZE: u16 = HIGH_RAM_END - HIGH_RAM_START;
+const INTERRUPT_ENABLE_REGISTER_SIZE: u16 = 1;
+
+const MEMORY_SIZE: u16 =
+  VIDEO_RAM_SIZE + WORK_RAM_SIZE + OAM_SIZE + HIGH_RAM_SIZE + INTERRUPT_ENABLE_REGISTER_SIZE;
+
+const VIDEO_RAM_OFFSET: u16 = 0;
+const WORK_RAM_OFFSET: u16 = VIDEO_RAM_OFFSET + VIDEO_RAM_SIZE;
+const OAM_OFFSET: u16 = WORK_RAM_OFFSET + WORK_RAM_SIZE;
+const HIGH_RAM_OFFSET: u16 = OAM_OFFSET + OAM_SIZE;
+const INTERRUPT_ENABLE_OFFSET: u16 = HIGH_RAM_OFFSET + HIGH_RAM_SIZE;
+
+const CARTRIDGE_TYPE: u16 = 0x147;

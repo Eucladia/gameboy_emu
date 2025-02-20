@@ -5,6 +5,17 @@ use crate::{
   instructions::{Instruction, Operand},
 };
 
+/// The types of interrupts.
+#[derive(Debug, Copy, Clone)]
+#[repr(u8)]
+pub enum Interrupt {
+  VBlank = 1 << 0,
+  LCD = 1 << 1,
+  Timer = 1 << 2,
+  Serial = 1 << 3,
+  Joypad = 1 << 4,
+}
+
 #[derive(Debug)]
 pub struct Cpu {
   /// The set flags.
@@ -19,15 +30,6 @@ pub struct Cpu {
   stopped: bool,
   /// Master interrupt flag.
   master_interrupt_enabled: bool,
-}
-
-/// The internal time clock.
-#[derive(Debug, Default, Clone, Eq, PartialEq)]
-struct ClockState {
-  /// Machine cycles.
-  pub m_cycles: usize,
-  /// Tick cycles.
-  pub t_cycles: usize,
 }
 
 impl Cpu {
@@ -1554,6 +1556,15 @@ impl Cpu {
   fn set_flag(&mut self, flags: Flags) {
     self.flags |= flags as u8;
   }
+}
+
+/// The internal time clock.
+#[derive(Debug, Default, Clone, Eq, PartialEq)]
+struct ClockState {
+  /// Machine cycles.
+  pub m_cycles: usize,
+  /// Tick cycles.
+  pub t_cycles: usize,
 }
 
 impl ClockState {
