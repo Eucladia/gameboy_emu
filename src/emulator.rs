@@ -1,4 +1,4 @@
-use crate::cpu::Cpu;
+use crate::hardware::Cpu;
 
 #[derive(Debug)]
 pub struct Emulator {

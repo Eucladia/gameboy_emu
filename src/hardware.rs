@@ -1,5 +1,12 @@
-use crate::joypad::Joypad;
-use crate::memory::{Cartridge, Mbc0};
+pub mod cartridge;
+pub mod cpu;
+pub mod joypad;
+pub mod registers;
+
+pub use cpu::Cpu;
+pub use joypad::Joypad;
+
+use cartridge::{Cartridge, RomOnly};
 
 /// The starting address for ROM bank 0.
 const ROM_BANK_0_START: u16 = 0;
@@ -86,7 +93,7 @@ pub struct Hardware {
 impl Hardware {
   pub fn new(bytes: Vec<u8>) -> Self {
     let cartridge = match bytes[CARTRIDGE_TYPE as usize] {
-      0 => Cartridge::Zero(Mbc0::new(bytes)),
+      0 => Cartridge::RomOnly(RomOnly::new(bytes)),
       b => panic!("got invalid memory cartridge type: {b:02X}"),
     };
 

@@ -1,6 +1,6 @@
 use crate::{
   flags::ConditionalFlag,
-  registers::{Register, RegisterPair},
+  hardware::registers::{Register, RegisterPair},
 };
 
 /// A GBZ80 Assembly instruction.

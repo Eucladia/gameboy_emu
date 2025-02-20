@@ -1,18 +1,13 @@
 mod cartridge_header;
-mod cpu;
 mod emulator;
 mod error;
 mod flags;
 mod hardware;
 mod instructions;
-mod joypad;
-mod memory;
-mod registers;
 
 use cartridge_header::CartridgeHeader;
 pub use error::*;
 
-use cpu::Cpu;
 use std::fs;
 
 fn main() {

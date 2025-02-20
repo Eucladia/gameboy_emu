@@ -1,8 +1,8 @@
 use crate::{
   flags::{ConditionalFlag, Flags},
+  hardware::registers::{Register, RegisterPair, Registers},
   hardware::Hardware,
   instructions::{Instruction, Operand},
-  registers::{Register, RegisterPair, Registers},
 };
 
 #[derive(Debug)]

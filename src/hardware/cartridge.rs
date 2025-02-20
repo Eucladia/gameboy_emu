@@ -1,16 +1,14 @@
-use crate::memory::Mbc0;
-
-/// The kind of memory bank controller.
+// A kind of cartridge.
 #[derive(Debug)]
 pub enum Cartridge {
-  Zero(Mbc0),
+  RomOnly(RomOnly),
 }
 
 impl Cartridge {
   /// Reads the value specified by the address in ROM.
   pub fn read_rom(&self, address: u16) -> u8 {
     match self {
-      Cartridge::Zero(mbc) => mbc.read_rom(address),
+      Cartridge::RomOnly(cartridge) => cartridge.read_rom(address),
     }
   }
 
@@ -18,7 +16,7 @@ impl Cartridge {
   pub fn write_rom(&self, address: u16, value: u8) {
     match self {
       // This cartridge type does not have any ROM
-      Cartridge::Zero(mbc) => {}
+      Cartridge::RomOnly(cartridge) => {}
     }
   }
 
@@ -26,7 +24,7 @@ impl Cartridge {
   pub fn read_ram(&self, address: u16) -> u8 {
     match self {
       // This cartridge type does not have any RAM
-      Cartridge::Zero(_) => 0xFF,
+      Cartridge::RomOnly(_) => 0xFF,
     }
   }
 
@@ -34,7 +32,25 @@ impl Cartridge {
   pub fn write_ram(&mut self, address: u16, value: u8) {
     match self {
       // No-op because this cartridge has no RAM
-      Cartridge::Zero(_) => {}
+      Cartridge::RomOnly(_) => {}
     }
+  }
+}
+
+/// A cartridge that only has ROM and no memory bank controller.
+#[derive(Debug)]
+pub struct RomOnly {
+  rom: Vec<u8>,
+}
+
+impl RomOnly {
+  pub fn new(rom: Vec<u8>) -> Self {
+    Self { rom }
+  }
+
+  /// Reads from the ROM.
+  pub fn read_rom(&self, address: u16) -> u8 {
+    // Return 0xFF for unmapped memory
+    self.rom.get(address as usize).copied().unwrap_or(0xFF)
   }
 }
