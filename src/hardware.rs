@@ -1,27 +1,62 @@
-use crate::addresses;
 use crate::joypad::Joypad;
 use crate::memory::{Cartridge, Mbc0};
 
-const VIDEO_RAM_SIZE: u16 = addresses::VIDEO_RAM_END - addresses::VIDEO_RAM_START;
-const WORK_RAM_SIZE: u16 = addresses::WORK_RAM_END - addresses::WORK_RAM_START;
-const OAM_SIZE: u16 = addresses::OAM_END - addresses::OAM_START;
-const IO_REGISTER_SIZE: u16 = addresses::IO_REGISTER_END - addresses::IO_REGISTER_START;
-const HIGH_RAM_SIZE: u16 = addresses::HIGH_RAM_END - addresses::HIGH_RAM_START;
+/// The starting address for ROM bank 0.
+const ROM_BANK_0_START: u16 = 0;
+/// The ending address for ROM bank 0.
+const ROM_BANK_0_END: u16 = 0x4000;
+/// The starting address for the switchable ROM bank.
+const ROM_BANK_N_START: u16 = 0x4000;
+/// The ending address  for the switchable ROM bank.
+const ROM_BANK_N_END: u16 = 0x8000;
+/// The starting address for VRAM.
+const VIDEO_RAM_START: u16 = 0x8000;
+/// The ending address  for VRAM.
+const VIDEO_RAM_END: u16 = 0xA000;
+/// The starting address for the cartridges RAM.
+const EXTERNAL_RAM_START: u16 = 0xA000;
+/// The ending address for the cartridges  RAM.
+const EXTERNAL_RAM_END: u16 = 0xC000;
+/// The starting address for work RAM.
+const WORK_RAM_START: u16 = 0xC000;
+/// The ending address for work  RAM.
+const WORK_RAM_END: u16 = 0xE000;
+/// The starting address for echo RAM.
+const ECHO_RAM_START: u16 = 0xE000;
+/// The ending address for echo RAM.
+const ECHO_RAM_END: u16 = 0xFE00;
+/// The starting address for the OAM (sprite attribute memory).
+const OAM_START: u16 = 0xFE00;
+/// The ending address for the OAM (sprite attribute memory).
+const OAM_END: u16 = 0xFEA0;
+/// The starting address for unused memory.
+const UNUSED_START: u16 = 0xFEA0;
+/// The ending address for unused memory.
+const UNUSED_END: u16 = 0xFF00;
+/// The starting address for I/O registers.
+const IO_REGISTER_START: u16 = 0xFF00;
+/// The ending address for I/O registers.
+const IO_REGISTER_END: u16 = 0xFF80;
+/// The starting address for HRAM.
+const HIGH_RAM_START: u16 = 0xFF80;
+/// The ending address for HRAM.
+const HIGH_RAM_END: u16 = 0xFFFF;
+/// The interrupt enable register.
+const INTERRUPT_ENABLE_REGISTER: u16 = 0xFFFF;
+
+const VIDEO_RAM_SIZE: u16 = VIDEO_RAM_END - VIDEO_RAM_START;
+const WORK_RAM_SIZE: u16 = WORK_RAM_END - WORK_RAM_START;
+const OAM_SIZE: u16 = OAM_END - OAM_START;
+const HIGH_RAM_SIZE: u16 = HIGH_RAM_END - HIGH_RAM_START;
 const INTERRUPT_ENABLE_REGISTER_SIZE: u16 = 1;
 
-const MEMORY_SIZE: u16 = VIDEO_RAM_SIZE
-  + WORK_RAM_SIZE
-  + OAM_SIZE
-  // TODO: IO stuff should be separate
-  + IO_REGISTER_SIZE
-  + HIGH_RAM_SIZE
-  + INTERRUPT_ENABLE_REGISTER_SIZE;
+const MEMORY_SIZE: u16 =
+  VIDEO_RAM_SIZE + WORK_RAM_SIZE + OAM_SIZE + HIGH_RAM_SIZE + INTERRUPT_ENABLE_REGISTER_SIZE;
 
 const VIDEO_RAM_OFFSET: u16 = 0;
 const WORK_RAM_OFFSET: u16 = VIDEO_RAM_OFFSET + VIDEO_RAM_SIZE;
 const OAM_OFFSET: u16 = WORK_RAM_OFFSET + WORK_RAM_SIZE;
-const IO_REGISTER_OFFSET: u16 = OAM_OFFSET + OAM_SIZE;
-const HIGH_RAM_OFFSET: u16 = IO_REGISTER_OFFSET + IO_REGISTER_SIZE;
+const HIGH_RAM_OFFSET: u16 = OAM_OFFSET + OAM_SIZE;
 const INTERRUPT_ENABLE_OFFSET: u16 = HIGH_RAM_OFFSET + HIGH_RAM_SIZE;
 
 const JOYPAD_REGISTER: u16 = 0xFF00;
@@ -66,50 +101,35 @@ impl Hardware {
   pub fn read_byte(&self, address: u16) -> u8 {
     match address {
       // ROM
-      addresses::ROM_BANK_0_START..addresses::ROM_BANK_0_END => self.cartridge.read_rom(address),
+      ROM_BANK_0_START..ROM_BANK_0_END => self.cartridge.read_rom(address),
       // ROM, bank N
-      addresses::ROM_BANK_N_START..addresses::ROM_BANK_N_END => self.cartridge.read_rom(address),
+      ROM_BANK_N_START..ROM_BANK_N_END => self.cartridge.read_rom(address),
       // Video RAM
-      addresses::VIDEO_RAM_START..addresses::VIDEO_RAM_END => {
-        self.memory[(VIDEO_RAM_OFFSET + (address - addresses::VIDEO_RAM_START)) as usize]
+      VIDEO_RAM_START..VIDEO_RAM_END => {
+        self.memory[(VIDEO_RAM_OFFSET + (address - VIDEO_RAM_START)) as usize]
       }
       // External RAM
-      addresses::EXTERNAL_RAM_START..addresses::EXTERNAL_RAM_END => {
-        self.cartridge.read_ram(address)
-      }
+      EXTERNAL_RAM_START..EXTERNAL_RAM_END => self.cartridge.read_ram(address),
       // Work RAM
-      addresses::WORK_RAM_START..addresses::WORK_RAM_END => {
-        self.memory[(WORK_RAM_OFFSET + (address - addresses::WORK_RAM_START)) as usize]
+      WORK_RAM_START..WORK_RAM_END => {
+        self.memory[(WORK_RAM_OFFSET + (address - WORK_RAM_START)) as usize]
       }
       // Echo RAM
-      addresses::ECHO_RAM_START..addresses::ECHO_RAM_END => {
-        self.memory[(WORK_RAM_OFFSET + (address - addresses::ECHO_RAM_START)) as usize]
+      ECHO_RAM_START..ECHO_RAM_END => {
+        self.memory[(WORK_RAM_OFFSET + (address - ECHO_RAM_START)) as usize]
       }
       // Sprite memory
-      addresses::OAM_START..addresses::OAM_END => {
-        self.memory[(OAM_OFFSET + (address - addresses::OAM_START)) as usize]
-      }
+      OAM_START..OAM_END => self.memory[(OAM_OFFSET + (address - OAM_START)) as usize],
       // Unused
-      addresses::UNUSED_START..addresses::UNUSED_END => 0xFF,
+      UNUSED_START..UNUSED_END => 0xFF,
       // I/O Registers
-      addresses::IO_REGISTER_START..addresses::IO_REGISTER_END => self.read_io_register(address),
+      IO_REGISTER_START..IO_REGISTER_END => self.read_io_register(address),
       // High RAM
-      addresses::HIGH_RAM_START..addresses::HIGH_RAM_END => {
-        self.memory[(HIGH_RAM_OFFSET + (address - addresses::HIGH_RAM_START)) as usize]
+      HIGH_RAM_START..HIGH_RAM_END => {
+        self.memory[(HIGH_RAM_OFFSET + (address - HIGH_RAM_START)) as usize]
       }
       // Interrupt enable register
-      addresses::INTERRUPT_ENABLE_REGISTER => self.memory[INTERRUPT_ENABLE_OFFSET as usize],
-    }
-  }
-
-  fn read_io_register(&self, address: u16) -> u8 {
-    match address {
-      JOYPAD_REGISTER => {
-        let joypad_state = self.memory[(IO_REGISTER_OFFSET + (address - JOYPAD_REGISTER)) as usize];
-
-        self.joypad.read(joypad_state)
-      }
-      _ => todo!("Other registers"),
+      INTERRUPT_ENABLE_REGISTER => self.memory[INTERRUPT_ENABLE_OFFSET as usize],
     }
   }
 
@@ -125,46 +145,49 @@ impl Hardware {
   pub fn write_byte(&mut self, address: u16, value: u8) {
     match address {
       // ROM
-      addresses::ROM_BANK_0_START..addresses::ROM_BANK_0_END => {
-        self.cartridge.write_rom(address, value)
-      }
+      ROM_BANK_0_START..ROM_BANK_0_END => self.cartridge.write_rom(address, value),
       // Switchable ROM bank
-      addresses::ROM_BANK_N_START..addresses::ROM_BANK_N_END => {
-        self.cartridge.write_rom(address, value)
-      }
+      ROM_BANK_N_START..ROM_BANK_N_END => self.cartridge.write_rom(address, value),
       // Video RAM
-      addresses::VIDEO_RAM_START..addresses::VIDEO_RAM_END => {
-        self.memory[(VIDEO_RAM_OFFSET + (address - addresses::VIDEO_RAM_START)) as usize] = value
+      VIDEO_RAM_START..VIDEO_RAM_END => {
+        self.memory[(VIDEO_RAM_OFFSET + (address - VIDEO_RAM_START)) as usize] = value
       }
       // External RAM
-      addresses::EXTERNAL_RAM_START..addresses::EXTERNAL_RAM_END => {
-        self.cartridge.write_ram(address, value)
-      }
+      EXTERNAL_RAM_START..EXTERNAL_RAM_END => self.cartridge.write_ram(address, value),
       // Work RAM
-      addresses::WORK_RAM_START..addresses::WORK_RAM_END => {
-        self.memory[(WORK_RAM_OFFSET + (address - addresses::WORK_RAM_START)) as usize] = value
+      WORK_RAM_START..WORK_RAM_END => {
+        self.memory[(WORK_RAM_OFFSET + (address - WORK_RAM_START)) as usize] = value
       }
       // Echo RAM
-      addresses::ECHO_RAM_START..addresses::ECHO_RAM_END => {
-        self.memory[(WORK_RAM_OFFSET + (address - addresses::ECHO_RAM_START)) as usize] = value
+      ECHO_RAM_START..ECHO_RAM_END => {
+        self.memory[(WORK_RAM_OFFSET + (address - ECHO_RAM_START)) as usize] = value
       }
       // Sprite memory
-      addresses::OAM_START..addresses::OAM_END => {
-        self.memory[(OAM_OFFSET + (address - addresses::OAM_START)) as usize] = value
-      }
+      OAM_START..OAM_END => self.memory[(OAM_OFFSET + (address - OAM_START)) as usize] = value,
       // Unused
-      addresses::UNUSED_START..addresses::UNUSED_END => {}
+      UNUSED_START..UNUSED_END => {}
       // I/O Registers
-      addresses::IO_REGISTER_START..addresses::IO_REGISTER_END => {
-        self.memory[(IO_REGISTER_OFFSET + (address - addresses::IO_REGISTER_START)) as usize] =
-          value
-      }
+      IO_REGISTER_START..IO_REGISTER_END => self.write_io_register(address, value),
       // High RAM
-      addresses::HIGH_RAM_START..addresses::HIGH_RAM_END => {
-        self.memory[(HIGH_RAM_OFFSET + (address - addresses::HIGH_RAM_START)) as usize] = value
+      HIGH_RAM_START..HIGH_RAM_END => {
+        self.memory[(HIGH_RAM_OFFSET + (address - HIGH_RAM_START)) as usize] = value
       }
       // Interrupt register
-      addresses::INTERRUPT_ENABLE_REGISTER => self.memory[INTERRUPT_ENABLE_OFFSET as usize] = value,
+      INTERRUPT_ENABLE_REGISTER => self.memory[INTERRUPT_ENABLE_OFFSET as usize] = value,
+    }
+  }
+
+  fn read_io_register(&self, address: u16) -> u8 {
+    match address {
+      JOYPAD_REGISTER => self.joypad.read(),
+      _ => todo!("Other registers"),
+    }
+  }
+
+  fn write_io_register(&mut self, address: u16, value: u8) {
+    match address {
+      JOYPAD_REGISTER => self.joypad.write(value),
+      _ => todo!("Other registers"),
     }
   }
 }

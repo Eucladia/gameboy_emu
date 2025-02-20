@@ -1,63 +1,66 @@
 #[derive(Debug, Clone)]
 pub struct Joypad {
+  /// The buttons that are pressed.
   pressed: u8,
+  /// The group of buttons that are pressed.
+  button_group: u8,
 }
 
+/// The Gameboy's buttons.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
+#[repr(u8)]
 pub enum Button {
-  A,
-  B,
-  Select,
-  Start,
-  Right,
-  Left,
-  Up,
-  Down,
+  A = 1 << 0,
+  B = 1 << 1,
+  Select = 1 << 2,
+  Start = 1 << 3,
+  Right = 1 << 4,
+  Left = 1 << 5,
+  Up = 1 << 6,
+  Down = 1 << 7,
 }
 
 impl Joypad {
   pub const fn new() -> Self {
-    // Mark all buttons as unpressed
-    Self { pressed: 0xFF }
+    Self {
+      // Mark all buttons as released, because a value of 0 means its pressed
+      pressed: 0xFF,
+      // Mark the groups as unselected
+      button_group: 0xF0,
+    }
   }
 
   /// Reads the value of the joypad.
-  pub fn read(&self, joypad_byte: u8) -> u8 {
-    let group = joypad_byte & 0x30;
-
-    match group {
-      // Read the select buttons
-      0x20 => (self.pressed & 0x0F) | group,
-      // Read the d-pad
-      0x10 => ((self.pressed >> 4) & 0x0F) | group,
+  pub fn read(&self) -> u8 {
+    let lower_nibble = match (self.button_group >> 4) & 0b11 {
+      // The action group was selected, if the 5th bit was 0
+      0b01 | 0b00 => self.pressed & 0x0F,
+      // The d-pad group was selected, if the 4th bit was 0
+      0b10 => (self.pressed & 0xF0) >> 4,
       // No buttons selected
       _ => 0x0F,
-    }
+    };
+
+    // The upper 2 bits are always set
+    0xC0 | self.button_group | lower_nibble
+  }
+
+  /// Updates the joypad group.
+  pub fn write(&mut self, value: u8) {
+    // Only bits 4 and 5 are writeable
+    self.button_group = value & 0x30;
   }
 
   /// Updates the button's state.
   pub fn update_state(&mut self, button: Button, pressed: bool) {
-    let mask = button.bit_mask();
+    // TODO: Interrupts
+    let mask = button as u8;
 
-    // A set button is set to 0 on the Gameboy
+    // A button is pressed if its bit is set to 0
     if pressed {
       self.pressed &= !mask;
     } else {
       self.pressed |= mask;
     }
-  }
-}
-
-impl Button {
-  /// Returns a bitmask of the button.
-  pub const fn bit_mask(self) -> u8 {
-    let bit_pos = match self {
-      Button::A | Button::Right => 0,
-      Button::B | Button::Left => 1,
-      Button::Select | Button::Up => 2,
-      Button::Start | Button::Down => 3,
-    };
-
-    1 << bit_pos
   }
 }

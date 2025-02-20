@@ -1,4 +1,3 @@
-mod addresses;
 mod cartridge_header;
 mod cpu;
 mod emulator;
