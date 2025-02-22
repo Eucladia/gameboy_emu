@@ -5,21 +5,13 @@ pub mod registers;
 pub mod timer;
 
 pub use cpu::Cpu;
+use joypad::Button;
 pub use joypad::Joypad;
 pub use timer::Timer;
 
 use cartridge::{Cartridge, RomOnly};
 
-/// The types of interrupts.
-#[derive(Debug, Copy, Clone)]
-#[repr(u8)]
-pub enum Interrupt {
-  VBlank = 1 << 0,
-  LCD = 1 << 1,
-  Timer = 1 << 2,
-  Serial = 1 << 3,
-  Joypad = 1 << 4,
-}
+use crate::interrupts::{Interrupt, Interrupts};
 
 #[derive(Debug)]
 pub struct Hardware {
@@ -31,6 +23,8 @@ pub struct Hardware {
   cartridge: Cartridge,
   /// The timer.
   timer: Timer,
+  /// The set interrupts
+  interrupts: Interrupts,
 }
 
 impl Hardware {
@@ -44,6 +38,7 @@ impl Hardware {
       memory: [0; MEMORY_SIZE as usize],
       joypad: Joypad::new(),
       timer: Timer::new(),
+      interrupts: Interrupts::new(),
       cartridge,
     }
   }
@@ -128,14 +123,30 @@ impl Hardware {
     }
   }
 
+  /// Runs a cycle of the Timer, requesting an interrupt if necessary.
   pub fn step_timer(&mut self, t_cycles: u16) {
     let overflowed = self.timer.step(t_cycles);
+
+    if overflowed && self.interrupts.is_enabled(Interrupt::Timer) {
+      self.interrupts.request_interrupt(Interrupt::Timer);
+    }
+  }
+
+  /// Updates the buttons state, requesting an interrupt if necessary.
+  pub fn update_button(&mut self, button: Button, pressed: bool) {
+    let changed = self.joypad.update_state(button, pressed);
+
+    if changed && self.interrupts.is_enabled(Interrupt::Joypad) {
+      self.interrupts.request_interrupt(Interrupt::Joypad);
+    }
   }
 
   fn read_io_register(&self, address: u16) -> u8 {
     match address {
       JOYPAD_REGISTER => self.joypad.read(),
       TIMER_REGISTER_START..TIMER_REGISTER_END => self.timer.read(address),
+      INTERRUPT_FLAG => self.interrupts.requested_bitfield(),
+      INTERRUPT_ENABLE_REGISTER => self.interrupts.enabled_bitfield(),
       _ => todo!("Other registers"),
     }
   }
@@ -144,6 +155,8 @@ impl Hardware {
     match address {
       JOYPAD_REGISTER => self.joypad.write(value),
       TIMER_REGISTER_START..TIMER_REGISTER_END => self.timer.write(address, value),
+      INTERRUPT_FLAG => self.interrupts.set_requested(value),
+      INTERRUPT_ENABLE_REGISTER => self.interrupts.set_enabled(value),
       _ => todo!("Other registers"),
     }
   }
@@ -151,6 +164,8 @@ impl Hardware {
 
 /// The address of the joypad register.
 const JOYPAD_REGISTER: u16 = 0xFF00;
+/// The address of the interrupt flag.
+const INTERRUPT_FLAG: u16 = 0xFF0F;
 
 /// The starting address for ROM bank 0.
 const ROM_BANK_0_START: u16 = 0;

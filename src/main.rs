@@ -4,6 +4,7 @@ mod error;
 mod flags;
 mod hardware;
 mod instructions;
+mod interrupts;
 
 use cartridge_header::CartridgeHeader;
 pub use error::*;

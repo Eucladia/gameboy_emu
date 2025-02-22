@@ -51,9 +51,9 @@ impl Joypad {
     self.button_group = value & 0x30;
   }
 
-  /// Updates the button's state.
-  pub fn update_state(&mut self, button: Button, pressed: bool) {
-    // TODO: Interrupts
+  /// Updates the button's state, returning whether there was a change.
+  pub fn update_state(&mut self, button: Button, pressed: bool) -> bool {
+    let before = self.pressed;
     let mask = button as u8;
 
     // A button is pressed if its bit is set to 0
@@ -62,5 +62,7 @@ impl Joypad {
     } else {
       self.pressed |= mask;
     }
+
+    self.pressed != before
   }
 }
