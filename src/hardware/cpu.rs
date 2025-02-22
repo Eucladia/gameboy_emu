@@ -5,17 +5,6 @@ use crate::{
   instructions::{Instruction, Operand},
 };
 
-/// The types of interrupts.
-#[derive(Debug, Copy, Clone)]
-#[repr(u8)]
-pub enum Interrupt {
-  VBlank = 1 << 0,
-  LCD = 1 << 1,
-  Timer = 1 << 2,
-  Serial = 1 << 3,
-  Joypad = 1 << 4,
-}
-
 #[derive(Debug)]
 pub struct Cpu {
   /// The set flags.
