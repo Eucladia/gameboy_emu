@@ -5,6 +5,14 @@ use crate::{
   instructions::{Instruction, Operand},
 };
 
+/// The possible states of the CPU.
+#[derive(Debug, Copy, Clone)]
+pub enum CpuState {
+  Running,
+  Halted,
+  Stopped,
+}
+
 #[derive(Debug)]
 pub struct Cpu {
   /// The set flags.
@@ -13,10 +21,8 @@ pub struct Cpu {
   clock: ClockState,
   /// The registers.
   registers: Registers,
-  /// Whether the CPU has been halted.
-  halted: bool,
-  /// Whether the CPU has been "stopped".
-  stopped: bool,
+  /// The state of the CPU.
+  state: CpuState,
   /// Master interrupt flag.
   master_interrupt_enabled: bool,
 }
@@ -26,8 +32,7 @@ impl Cpu {
     Self {
       flags: 0,
       master_interrupt_enabled: false,
-      stopped: false,
-      halted: false,
+      state: CpuState::Running,
       clock: ClockState::default(),
       registers: Registers::default(),
     }
@@ -686,11 +691,11 @@ impl Cpu {
         self.clock.advance(4);
       }
       STOP(Operand::Byte(_)) => {
-        self.stopped = true;
+        self.state = CpuState::Stopped;
         self.clock.tick();
       }
       HALT => {
-        self.halted = true;
+        self.state = CpuState::Halted;
         self.clock.tick();
       }
       NOP => {
