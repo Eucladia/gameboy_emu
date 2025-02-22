@@ -75,7 +75,7 @@ impl Hardware {
         self.memory[(HIGH_RAM_OFFSET + (address - HIGH_RAM_START)) as usize]
       }
       // Interrupt enable register
-      INTERRUPT_ENABLE_REGISTER => self.memory[INTERRUPT_ENABLE_OFFSET as usize],
+      INTERRUPT_ENABLE_REGISTER => self.interrupts.enabled_bitfield(),
     }
   }
 
@@ -118,8 +118,8 @@ impl Hardware {
       HIGH_RAM_START..HIGH_RAM_END => {
         self.memory[(HIGH_RAM_OFFSET + (address - HIGH_RAM_START)) as usize] = value
       }
-      // Interrupt register
-      INTERRUPT_ENABLE_REGISTER => self.memory[INTERRUPT_ENABLE_OFFSET as usize] = value,
+      // Interrupt enable register
+      INTERRUPT_ENABLE_REGISTER => self.interrupts.set_enabled(value),
     }
   }
 
@@ -146,7 +146,6 @@ impl Hardware {
       JOYPAD_REGISTER => self.joypad.read(),
       TIMER_REGISTER_START..TIMER_REGISTER_END => self.timer.read(address),
       INTERRUPT_FLAG => self.interrupts.requested_bitfield(),
-      INTERRUPT_ENABLE_REGISTER => self.interrupts.enabled_bitfield(),
       _ => todo!("Other registers"),
     }
   }
@@ -156,7 +155,6 @@ impl Hardware {
       JOYPAD_REGISTER => self.joypad.write(value),
       TIMER_REGISTER_START..TIMER_REGISTER_END => self.timer.write(address, value),
       INTERRUPT_FLAG => self.interrupts.set_requested(value),
-      INTERRUPT_ENABLE_REGISTER => self.interrupts.set_enabled(value),
       _ => todo!("Other registers"),
     }
   }
@@ -221,8 +219,7 @@ const OAM_SIZE: u16 = OAM_END - OAM_START;
 const HIGH_RAM_SIZE: u16 = HIGH_RAM_END - HIGH_RAM_START;
 const INTERRUPT_ENABLE_REGISTER_SIZE: u16 = 1;
 
-const MEMORY_SIZE: u16 =
-  VIDEO_RAM_SIZE + WORK_RAM_SIZE + OAM_SIZE + HIGH_RAM_SIZE + INTERRUPT_ENABLE_REGISTER_SIZE;
+const MEMORY_SIZE: u16 = VIDEO_RAM_SIZE + WORK_RAM_SIZE + OAM_SIZE + HIGH_RAM_SIZE;
 
 const VIDEO_RAM_OFFSET: u16 = 0;
 const WORK_RAM_OFFSET: u16 = VIDEO_RAM_OFFSET + VIDEO_RAM_SIZE;
