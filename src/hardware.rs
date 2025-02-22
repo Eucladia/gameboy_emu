@@ -2,9 +2,11 @@ pub mod cartridge;
 pub mod cpu;
 pub mod joypad;
 pub mod registers;
+pub mod timer;
 
 pub use cpu::Cpu;
 pub use joypad::Joypad;
+pub use timer::Timer;
 
 use cartridge::{Cartridge, RomOnly};
 
@@ -27,6 +29,8 @@ pub struct Hardware {
   joypad: Joypad,
   /// The game cartridge.
   cartridge: Cartridge,
+  /// The timer.
+  timer: Timer,
 }
 
 impl Hardware {
@@ -39,6 +43,7 @@ impl Hardware {
     Self {
       memory: [0; MEMORY_SIZE as usize],
       joypad: Joypad::new(),
+      timer: Timer::new(),
       cartridge,
     }
   }
@@ -123,9 +128,14 @@ impl Hardware {
     }
   }
 
+  pub fn step_timer(&mut self, t_cycles: u16) {
+    let overflowed = self.timer.step(t_cycles);
+  }
+
   fn read_io_register(&self, address: u16) -> u8 {
     match address {
       JOYPAD_REGISTER => self.joypad.read(),
+      TIMER_REGISTER_START..TIMER_REGISTER_END => self.timer.read(address),
       _ => todo!("Other registers"),
     }
   }
@@ -133,6 +143,7 @@ impl Hardware {
   fn write_io_register(&mut self, address: u16, value: u8) {
     match address {
       JOYPAD_REGISTER => self.joypad.write(value),
+      TIMER_REGISTER_START..TIMER_REGISTER_END => self.timer.write(address, value),
       _ => todo!("Other registers"),
     }
   }
@@ -183,6 +194,11 @@ const HIGH_RAM_START: u16 = 0xFF80;
 const HIGH_RAM_END: u16 = 0xFFFF;
 /// The interrupt enable register.
 const INTERRUPT_ENABLE_REGISTER: u16 = 0xFFFF;
+
+/// The starting address of the timer register.
+const TIMER_REGISTER_START: u16 = 0xFF04;
+/// The ending address fo the timer register.
+const TIMER_REGISTER_END: u16 = 0xFF08;
 
 const VIDEO_RAM_SIZE: u16 = VIDEO_RAM_END - VIDEO_RAM_START;
 const WORK_RAM_SIZE: u16 = WORK_RAM_END - WORK_RAM_START;
