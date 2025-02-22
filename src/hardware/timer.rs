@@ -58,8 +58,8 @@ impl Timer {
   }
 
   /// Reads from the Timer's registers.
-  pub fn read(&self, addr: u16) -> u8 {
-    match addr {
+  pub fn read(&self, address: u16) -> u8 {
+    match address {
       DIVIDER_REGISTER => self.div,
       TIMER_COUNTER_REGISTER => self.tima,
       TIMER_MODULO_REGISTER => self.tma,
@@ -69,8 +69,8 @@ impl Timer {
   }
 
   /// Writes to Timer's registers.
-  pub fn write(&mut self, addr: u16, value: u8) {
-    match addr {
+  pub fn write(&mut self, address: u16, value: u8) {
+    match address {
       // Writing to DIV resets it
       DIVIDER_REGISTER => self.div = 0,
       TIMER_COUNTER_REGISTER => self.tima = value,
