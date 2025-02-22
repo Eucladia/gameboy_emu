@@ -26,11 +26,14 @@ $ cd gameboy_emu
 $ cargo build --release
 ```
 
-### Running a ROM
+### Running a ROM (Planned)
 ```sh
 $ cargo run --release -- path/to/rom.gb
 ```
-> **Note:** Currently, this emulator only supports ROMs that do **not** require a memory bank controller.
+> [!NOTE]
+>
+> This project is currently in an alpha state.
+> It is planned to support games that do **not** require a memory bank controller.
 
 ## Assembly Guide
 TODO: Include rationale for this and a `guide` folder with learning resources.
