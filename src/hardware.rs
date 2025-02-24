@@ -6,13 +6,13 @@ pub mod registers;
 pub mod timer;
 
 pub use cpu::Cpu;
-use joypad::Button;
 pub use joypad::Joypad;
 pub use timer::Timer;
 
-use cartridge::{Cartridge, RomOnly};
-
-use crate::interrupts::{Interrupt, Interrupts};
+use crate::{
+  hardware::cartridge::{Cartridge, RomOnly},
+  interrupts::Interrupts,
+};
 
 #[derive(Debug)]
 pub struct Hardware {
