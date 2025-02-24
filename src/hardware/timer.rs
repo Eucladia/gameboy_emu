@@ -1,3 +1,5 @@
+use crate::interrupts::{Interrupt, Interrupts};
+
 #[derive(Debug, Clone)]
 pub struct Timer {
   /// The internal counter used for tracking cycles.
@@ -23,9 +25,8 @@ impl Timer {
     }
   }
 
-  /// Advances the timer by a given number of CPU cycles, returning whether the
-  /// `TIMA` register  overflowed.
-  pub fn step(&mut self, cycles: u16) -> bool {
+  /// Steps the [`Timer`].
+  pub fn step(&mut self, interrupts: &mut Interrupts, cycles: u16) {
     self.counter = self.counter.wrapping_add(cycles);
 
     if self.counter > 0xFF {
@@ -47,14 +48,12 @@ impl Timer {
         if self.tima == 0xFF {
           self.tima = self.tma;
 
-          return true;
+          interrupts.request_interrupt(Interrupt::Timer);
         } else {
           self.tima = self.tima.wrapping_add(1);
         }
       }
     }
-
-    false
   }
 
   /// Reads from the Timer's registers.

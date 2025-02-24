@@ -124,24 +124,6 @@ impl Hardware {
     }
   }
 
-  /// Runs a cycle of the Timer, requesting an interrupt if necessary.
-  pub fn step_timer(&mut self, t_cycles: u16) {
-    let overflowed = self.timer.step(t_cycles);
-
-    if overflowed && self.interrupts.is_enabled(Interrupt::Timer) {
-      self.interrupts.request_interrupt(Interrupt::Timer);
-    }
-  }
-
-  /// Updates the buttons state, requesting an interrupt if necessary.
-  pub fn update_button(&mut self, button: Button, pressed: bool) {
-    let changed = self.joypad.update_state(button, pressed);
-
-    if changed && self.interrupts.is_enabled(Interrupt::Joypad) {
-      self.interrupts.request_interrupt(Interrupt::Joypad);
-    }
-  }
-
   fn read_io_register(&self, address: u16) -> u8 {
     match address {
       JOYPAD_REGISTER => self.joypad.read(),
