@@ -26,12 +26,21 @@ pub enum ConditionalFlag {
 
 impl ConditionalFlag {
   pub fn from_bits(bits: u8) -> Option<Self> {
-    Some(match bits {
+    ConditionalFlag::try_from(bits).ok()
+  }
+}
+
+impl TryFrom<u8> for ConditionalFlag {
+  type Error = ();
+
+  /// Attempts to convert the byte into a [`ConditionalFlag`].
+  fn try_from(bits: u8) -> Result<Self, Self::Error> {
+    Ok(match bits {
       0b00 => ConditionalFlag::NZ,
       0b01 => ConditionalFlag::Z,
       0b10 => ConditionalFlag::NC,
       0b11 => ConditionalFlag::C,
-      _ => return None,
+      _ => return Err(()),
     })
   }
 }
