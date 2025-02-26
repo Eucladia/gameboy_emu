@@ -1,5 +1,5 @@
 use crate::{
-  flags::{ConditionalFlag, Flags},
+  flags::{ConditionalFlag, Flag},
   hardware::registers::{Register, RegisterPair, Registers},
   hardware::Hardware,
   instructions::{Instruction, Operand},
@@ -190,7 +190,7 @@ impl Cpu {
       }
 
       ADC(Operand::Register(Register::A), Operand::Register(src)) => {
-        let is_carry_set = self.is_flag_set(Flags::C);
+        let is_carry_set = self.is_flag_set(Flag::C);
         let reg_value = self.read_register(hardware, *src);
         let res = self
           .registers
@@ -200,14 +200,14 @@ impl Cpu {
 
         self.registers.a = res;
 
-        self.toggle_flag(Flags::Z, res == 0);
-        self.toggle_flag(Flags::N, false);
+        self.toggle_flag(Flag::Z, res == 0);
+        self.toggle_flag(Flag::N, false);
         self.toggle_flag(
-          Flags::H,
+          Flag::H,
           (self.registers.a & 0x0F) + (reg_value & 0x0F) + (is_carry_set as u8 & 0x0F) > 0x0F,
         );
         self.toggle_flag(
-          Flags::C,
+          Flag::C,
           (self.registers.a as u16 + reg_value as u16 + is_carry_set as u16) > u8::MAX as u16,
         );
 
@@ -219,7 +219,7 @@ impl Cpu {
         }
       }
       ADC(Operand::Register(Register::A), Operand::Byte(byte)) => {
-        let is_carry_set = self.is_flag_set(Flags::C);
+        let is_carry_set = self.is_flag_set(Flag::C);
         let res = self
           .registers
           .a
@@ -228,14 +228,14 @@ impl Cpu {
 
         self.registers.a = res;
 
-        self.toggle_flag(Flags::Z, res == 0);
-        self.toggle_flag(Flags::N, false);
+        self.toggle_flag(Flag::Z, res == 0);
+        self.toggle_flag(Flag::N, false);
         self.toggle_flag(
-          Flags::H,
+          Flag::H,
           (self.registers.a & 0x0F) + (*byte & 0x0F) + (is_carry_set as u8 & 0x0F) > 0x0F,
         );
         self.toggle_flag(
-          Flags::C,
+          Flag::C,
           (self.registers.a as u16 + *byte as u16 + is_carry_set as u16) > u8::MAX as u16,
         );
 
@@ -247,14 +247,14 @@ impl Cpu {
 
         self.registers.a = res;
 
-        self.toggle_flag(Flags::Z, res == 0);
-        self.toggle_flag(Flags::N, false);
+        self.toggle_flag(Flag::Z, res == 0);
+        self.toggle_flag(Flag::N, false);
         self.toggle_flag(
-          Flags::H,
+          Flag::H,
           (self.registers.a & 0x0F) + (reg_value & 0x0F) > 0x0F,
         );
         self.toggle_flag(
-          Flags::C,
+          Flag::C,
           (self.registers.a as u16 + reg_value as u16) > u8::MAX as u16,
         );
 
@@ -270,11 +270,11 @@ impl Cpu {
 
         self.registers.a = res;
 
-        self.toggle_flag(Flags::Z, res == 0);
-        self.toggle_flag(Flags::N, false);
-        self.toggle_flag(Flags::H, (self.registers.a & 0x0F) + (*byte & 0x0F) > 0x0F);
+        self.toggle_flag(Flag::Z, res == 0);
+        self.toggle_flag(Flag::N, false);
+        self.toggle_flag(Flag::H, (self.registers.a & 0x0F) + (*byte & 0x0F) > 0x0F);
         self.toggle_flag(
-          Flags::C,
+          Flag::C,
           (self.registers.a as u16 + *byte as u16) > u8::MAX as u16,
         );
 
@@ -288,9 +288,9 @@ impl Cpu {
         self.registers.h = ((res >> 8) & 0xFF) as u8;
         self.registers.l = (res & 0xFF) as u8;
 
-        self.toggle_flag(Flags::N, false);
-        self.toggle_flag(Flags::H, (hl_value & 0x0FFF) + (rp_value & 0x0FFF) > 0x0FFF);
-        self.toggle_flag(Flags::C, res < hl_value);
+        self.toggle_flag(Flag::N, false);
+        self.toggle_flag(Flag::H, (hl_value & 0x0FFF) + (rp_value & 0x0FFF) > 0x0FFF);
+        self.toggle_flag(Flag::C, res < hl_value);
 
         self.clock.advance(2);
       }
@@ -301,10 +301,10 @@ impl Cpu {
 
         self.registers.sp = sp_value.wrapping_add(num);
 
-        self.toggle_flag(Flags::Z, false);
-        self.toggle_flag(Flags::N, false);
-        self.toggle_flag(Flags::H, (sp_value & 0x0F) + (num & 0x0F) > 0x0F);
-        self.toggle_flag(Flags::C, (sp_value & 0xFF) + (num & 0xFF) > 0xFF);
+        self.toggle_flag(Flag::Z, false);
+        self.toggle_flag(Flag::N, false);
+        self.toggle_flag(Flag::H, (sp_value & 0x0F) + (num & 0x0F) > 0x0F);
+        self.toggle_flag(Flag::C, (sp_value & 0xFF) + (num & 0xFF) > 0xFF);
 
         self.clock.advance(4);
       }
@@ -314,10 +314,10 @@ impl Cpu {
 
         self.registers.a = res;
 
-        self.toggle_flag(Flags::Z, res == 0);
-        self.toggle_flag(Flags::N, false);
-        self.toggle_flag(Flags::H, true);
-        self.toggle_flag(Flags::C, false);
+        self.toggle_flag(Flag::Z, res == 0);
+        self.toggle_flag(Flag::N, false);
+        self.toggle_flag(Flag::H, true);
+        self.toggle_flag(Flag::C, false);
 
         self.clock.tick();
 
@@ -331,10 +331,10 @@ impl Cpu {
 
         self.registers.a = res;
 
-        self.toggle_flag(Flags::Z, res == 0);
-        self.toggle_flag(Flags::N, false);
-        self.toggle_flag(Flags::H, true);
-        self.toggle_flag(Flags::C, false);
+        self.toggle_flag(Flag::Z, res == 0);
+        self.toggle_flag(Flag::N, false);
+        self.toggle_flag(Flag::H, true);
+        self.toggle_flag(Flag::C, false);
 
         self.clock.advance(2);
       }
@@ -344,10 +344,10 @@ impl Cpu {
 
         self.clock.tick();
 
-        self.toggle_flag(Flags::Z, res == 0);
-        self.toggle_flag(Flags::N, true);
-        self.toggle_flag(Flags::H, (self.registers.a & 0x0F) < (src_value & 0x0F));
-        self.toggle_flag(Flags::C, self.registers.a < src_value);
+        self.toggle_flag(Flag::Z, res == 0);
+        self.toggle_flag(Flag::N, true);
+        self.toggle_flag(Flag::H, (self.registers.a & 0x0F) < (src_value & 0x0F));
+        self.toggle_flag(Flag::C, self.registers.a < src_value);
 
         // Add another machine cycle if  we fetched memory
         if matches!(src_reg, Register::M) {
@@ -357,10 +357,10 @@ impl Cpu {
       CP(Operand::Register(Register::A), Operand::Byte(value)) => {
         let res = self.registers.a.wrapping_sub(*value);
 
-        self.toggle_flag(Flags::Z, res == 0);
-        self.toggle_flag(Flags::N, true);
-        self.toggle_flag(Flags::H, (self.registers.a & 0x0F) < (*value & 0x0F));
-        self.toggle_flag(Flags::C, self.registers.a < *value);
+        self.toggle_flag(Flag::Z, res == 0);
+        self.toggle_flag(Flag::N, true);
+        self.toggle_flag(Flag::H, (self.registers.a & 0x0F) < (*value & 0x0F));
+        self.toggle_flag(Flag::C, self.registers.a < *value);
 
         self.clock.advance(2);
       }
@@ -370,9 +370,9 @@ impl Cpu {
 
         self.write_register(hardware, *reg, res);
 
-        self.toggle_flag(Flags::Z, res == 0);
-        self.toggle_flag(Flags::N, true);
-        self.toggle_flag(Flags::H, (reg_value & 0x0F) == 0x0);
+        self.toggle_flag(Flag::Z, res == 0);
+        self.toggle_flag(Flag::N, true);
+        self.toggle_flag(Flag::H, (reg_value & 0x0F) == 0x0);
 
         self.clock.tick();
 
@@ -394,9 +394,9 @@ impl Cpu {
 
         self.write_register(hardware, *reg, res);
 
-        self.toggle_flag(Flags::Z, res == 0);
-        self.toggle_flag(Flags::N, false);
-        self.toggle_flag(Flags::H, (reg_value & 0x0F) == 0x0F);
+        self.toggle_flag(Flag::Z, res == 0);
+        self.toggle_flag(Flag::N, false);
+        self.toggle_flag(Flag::H, (reg_value & 0x0F) == 0x0F);
 
         self.clock.tick();
 
@@ -418,10 +418,10 @@ impl Cpu {
 
         self.registers.a = res;
 
-        self.toggle_flag(Flags::Z, res == 0);
-        self.toggle_flag(Flags::N, false);
-        self.toggle_flag(Flags::H, false);
-        self.toggle_flag(Flags::C, false);
+        self.toggle_flag(Flag::Z, res == 0);
+        self.toggle_flag(Flag::N, false);
+        self.toggle_flag(Flag::H, false);
+        self.toggle_flag(Flag::C, false);
 
         self.clock.tick();
 
@@ -435,29 +435,29 @@ impl Cpu {
 
         self.registers.a = res;
 
-        self.toggle_flag(Flags::Z, res == 0);
-        self.toggle_flag(Flags::N, false);
-        self.toggle_flag(Flags::H, false);
-        self.toggle_flag(Flags::C, false);
+        self.toggle_flag(Flag::Z, res == 0);
+        self.toggle_flag(Flag::N, false);
+        self.toggle_flag(Flag::H, false);
+        self.toggle_flag(Flag::C, false);
 
         self.clock.advance(2);
       }
       SBC(Operand::Register(Register::A), Operand::Register(reg)) => {
-        let is_carry_set = self.is_flag_set(Flags::C) as u8;
+        let is_carry_set = self.is_flag_set(Flag::C) as u8;
         let reg_value = self.read_register(hardware, *reg);
         let a_value = self.registers.a;
         let res = a_value.wrapping_sub(reg_value).wrapping_sub(is_carry_set);
 
         self.registers.a = res;
 
-        self.toggle_flag(Flags::Z, res == 0);
-        self.toggle_flag(Flags::N, true);
+        self.toggle_flag(Flag::Z, res == 0);
+        self.toggle_flag(Flag::N, true);
         self.toggle_flag(
-          Flags::H,
+          Flag::H,
           (a_value & 0x0F) < ((reg_value & 0x0F) + is_carry_set),
         );
         self.toggle_flag(
-          Flags::C,
+          Flag::C,
           (a_value as u16) < (reg_value as u16 + is_carry_set as u16),
         );
 
@@ -469,20 +469,17 @@ impl Cpu {
         }
       }
       SBC(Operand::Register(Register::A), Operand::Byte(value)) => {
-        let is_carry_set = self.is_flag_set(Flags::C) as u8;
+        let is_carry_set = self.is_flag_set(Flag::C) as u8;
         let a_value = self.registers.a;
         let res = a_value.wrapping_sub(*value).wrapping_sub(is_carry_set);
 
         self.registers.a = res;
 
-        self.toggle_flag(Flags::Z, res == 0);
-        self.toggle_flag(Flags::N, true);
+        self.toggle_flag(Flag::Z, res == 0);
+        self.toggle_flag(Flag::N, true);
+        self.toggle_flag(Flag::H, (a_value & 0x0F) < ((*value & 0x0F) + is_carry_set));
         self.toggle_flag(
-          Flags::H,
-          (a_value & 0x0F) < ((*value & 0x0F) + is_carry_set),
-        );
-        self.toggle_flag(
-          Flags::C,
+          Flag::C,
           (a_value as u16) < (*value as u16 + is_carry_set as u16),
         );
 
@@ -495,10 +492,10 @@ impl Cpu {
 
         self.registers.a = res;
 
-        self.toggle_flag(Flags::Z, res == 0);
-        self.toggle_flag(Flags::N, true);
-        self.toggle_flag(Flags::H, (a_value & 0x0F) < (reg_value & 0x0F));
-        self.toggle_flag(Flags::C, a_value < reg_value);
+        self.toggle_flag(Flag::Z, res == 0);
+        self.toggle_flag(Flag::N, true);
+        self.toggle_flag(Flag::H, (a_value & 0x0F) < (reg_value & 0x0F));
+        self.toggle_flag(Flag::C, a_value < reg_value);
 
         self.clock.tick();
 
@@ -513,10 +510,10 @@ impl Cpu {
 
         self.registers.a = res;
 
-        self.toggle_flag(Flags::Z, res == 0);
-        self.toggle_flag(Flags::N, true);
-        self.toggle_flag(Flags::H, (a_value & 0x0F) < (*value & 0x0F));
-        self.toggle_flag(Flags::C, a_value < *value);
+        self.toggle_flag(Flag::Z, res == 0);
+        self.toggle_flag(Flag::N, true);
+        self.toggle_flag(Flag::H, (a_value & 0x0F) < (*value & 0x0F));
+        self.toggle_flag(Flag::C, a_value < *value);
 
         self.clock.advance(2);
       }
@@ -526,10 +523,10 @@ impl Cpu {
 
         self.registers.a = res;
 
-        self.toggle_flag(Flags::Z, res == 0);
-        self.toggle_flag(Flags::N, false);
-        self.toggle_flag(Flags::H, false);
-        self.toggle_flag(Flags::C, false);
+        self.toggle_flag(Flag::Z, res == 0);
+        self.toggle_flag(Flag::N, false);
+        self.toggle_flag(Flag::H, false);
+        self.toggle_flag(Flag::C, false);
 
         self.clock.tick();
 
@@ -543,19 +540,19 @@ impl Cpu {
 
         self.registers.a = res;
 
-        self.toggle_flag(Flags::Z, res == 0);
-        self.toggle_flag(Flags::N, false);
-        self.toggle_flag(Flags::H, false);
-        self.toggle_flag(Flags::C, false);
+        self.toggle_flag(Flag::Z, res == 0);
+        self.toggle_flag(Flag::N, false);
+        self.toggle_flag(Flag::H, false);
+        self.toggle_flag(Flag::C, false);
 
         self.clock.advance(2);
       }
       DAA => {
         let mut correction = 0;
 
-        let subtracted = self.is_flag_set(Flags::N);
-        let half_carried = self.is_flag_set(Flags::H);
-        let mut carried = self.is_flag_set(Flags::C);
+        let subtracted = self.is_flag_set(Flag::N);
+        let half_carried = self.is_flag_set(Flag::H);
+        let mut carried = self.is_flag_set(Flag::C);
 
         // Check the lower nibble
         if half_carried || (!subtracted && (self.registers.a & 0x0F) > 0x09) {
@@ -576,9 +573,9 @@ impl Cpu {
 
         self.registers.a = res;
 
-        self.toggle_flag(Flags::Z, res == 0);
-        self.toggle_flag(Flags::H, false);
-        self.toggle_flag(Flags::C, carried);
+        self.toggle_flag(Flag::Z, res == 0);
+        self.toggle_flag(Flag::H, false);
+        self.toggle_flag(Flag::C, carried);
 
         self.clock.tick();
       }
@@ -724,17 +721,17 @@ impl Cpu {
         self.clock.advance(4);
       }
       CCF => {
-        self.toggle_flag(Flags::N, false);
-        self.toggle_flag(Flags::H, false);
-        self.toggle_flag(Flags::C, !self.is_flag_set(Flags::C));
+        self.toggle_flag(Flag::N, false);
+        self.toggle_flag(Flag::H, false);
+        self.toggle_flag(Flag::C, !self.is_flag_set(Flag::C));
 
         self.clock.tick();
       }
       CPL => {
         self.registers.a = !self.registers.a;
 
-        self.toggle_flag(Flags::N, true);
-        self.toggle_flag(Flags::H, true);
+        self.toggle_flag(Flag::N, true);
+        self.toggle_flag(Flag::H, true);
 
         self.clock.tick();
       }
@@ -747,24 +744,24 @@ impl Cpu {
         self.clock.tick();
       }
       SCF => {
-        self.toggle_flag(Flags::N, false);
-        self.toggle_flag(Flags::H, false);
-        self.toggle_flag(Flags::C, true);
+        self.toggle_flag(Flag::N, false);
+        self.toggle_flag(Flag::H, false);
+        self.toggle_flag(Flag::C, true);
 
         self.clock.tick();
       }
 
       RLA => {
-        let is_carry_set = self.is_flag_set(Flags::C);
+        let is_carry_set = self.is_flag_set(Flag::C);
         let a_value = self.registers.a;
         let res = (a_value << 1) | (is_carry_set as u8);
 
         self.registers.a = res;
 
-        self.toggle_flag(Flags::Z, false);
-        self.toggle_flag(Flags::N, false);
-        self.toggle_flag(Flags::H, false);
-        self.toggle_flag(Flags::C, (a_value >> 7) == 0x1);
+        self.toggle_flag(Flag::Z, false);
+        self.toggle_flag(Flag::N, false);
+        self.toggle_flag(Flag::H, false);
+        self.toggle_flag(Flag::C, (a_value >> 7) == 0x1);
 
         self.clock.tick();
       }
@@ -774,24 +771,24 @@ impl Cpu {
 
         self.registers.a = res;
 
-        self.toggle_flag(Flags::Z, false);
-        self.toggle_flag(Flags::N, false);
-        self.toggle_flag(Flags::H, false);
-        self.toggle_flag(Flags::C, (a_value >> 7) == 0x1);
+        self.toggle_flag(Flag::Z, false);
+        self.toggle_flag(Flag::N, false);
+        self.toggle_flag(Flag::H, false);
+        self.toggle_flag(Flag::C, (a_value >> 7) == 0x1);
 
         self.clock.tick();
       }
       RRA => {
-        let is_carry_set = self.is_flag_set(Flags::C);
+        let is_carry_set = self.is_flag_set(Flag::C);
         let a_value = self.registers.a;
         let res = (a_value >> 1) | ((is_carry_set as u8) << 7);
 
         self.registers.a = res;
 
-        self.toggle_flag(Flags::Z, false);
-        self.toggle_flag(Flags::N, false);
-        self.toggle_flag(Flags::H, false);
-        self.toggle_flag(Flags::C, (a_value & 0x1) == 1);
+        self.toggle_flag(Flag::Z, false);
+        self.toggle_flag(Flag::N, false);
+        self.toggle_flag(Flag::H, false);
+        self.toggle_flag(Flag::C, (a_value & 0x1) == 1);
 
         self.clock.tick();
       }
@@ -801,10 +798,10 @@ impl Cpu {
 
         self.registers.a = res;
 
-        self.toggle_flag(Flags::Z, false);
-        self.toggle_flag(Flags::N, false);
-        self.toggle_flag(Flags::H, false);
-        self.toggle_flag(Flags::C, (a_value & 0x1) == 1);
+        self.toggle_flag(Flag::Z, false);
+        self.toggle_flag(Flag::N, false);
+        self.toggle_flag(Flag::H, false);
+        self.toggle_flag(Flag::C, (a_value & 0x1) == 1);
 
         self.clock.tick();
       }
@@ -813,9 +810,9 @@ impl Cpu {
         let reg_value = self.read_register(hardware, *reg);
         let extracted_bit = (reg_value >> bit) & 1;
 
-        self.toggle_flag(Flags::Z, extracted_bit == 0);
-        self.toggle_flag(Flags::N, false);
-        self.toggle_flag(Flags::H, true);
+        self.toggle_flag(Flag::Z, extracted_bit == 0);
+        self.toggle_flag(Flag::N, false);
+        self.toggle_flag(Flag::H, true);
 
         self.clock.advance(2);
 
@@ -849,15 +846,15 @@ impl Cpu {
       }
       RL(Operand::Register(reg)) => {
         let reg_value = self.read_register(hardware, *reg);
-        let is_carry_set = self.is_flag_set(Flags::C) as u8;
+        let is_carry_set = self.is_flag_set(Flag::C) as u8;
         let res = (reg_value << 1) | is_carry_set;
 
         self.write_register(hardware, *reg, res);
 
-        self.toggle_flag(Flags::Z, res == 0);
-        self.toggle_flag(Flags::N, false);
-        self.toggle_flag(Flags::H, false);
-        self.toggle_flag(Flags::C, (reg_value >> 7) == 1);
+        self.toggle_flag(Flag::Z, res == 0);
+        self.toggle_flag(Flag::N, false);
+        self.toggle_flag(Flag::H, false);
+        self.toggle_flag(Flag::C, (reg_value >> 7) == 1);
 
         self.clock.advance(2);
 
@@ -872,10 +869,10 @@ impl Cpu {
 
         self.write_register(hardware, *reg, res);
 
-        self.toggle_flag(Flags::Z, res == 0);
-        self.toggle_flag(Flags::N, false);
-        self.toggle_flag(Flags::H, false);
-        self.toggle_flag(Flags::C, (reg_value >> 7) == 1);
+        self.toggle_flag(Flag::Z, res == 0);
+        self.toggle_flag(Flag::N, false);
+        self.toggle_flag(Flag::H, false);
+        self.toggle_flag(Flag::C, (reg_value >> 7) == 1);
 
         self.clock.advance(2);
 
@@ -886,15 +883,15 @@ impl Cpu {
       }
       RR(Operand::Register(reg)) => {
         let reg_value = self.read_register(hardware, *reg);
-        let is_carry_set = self.is_flag_set(Flags::C) as u8;
+        let is_carry_set = self.is_flag_set(Flag::C) as u8;
         let res = (reg_value >> 1) | (is_carry_set << 7);
 
         self.write_register(hardware, *reg, res);
 
-        self.toggle_flag(Flags::Z, res == 0);
-        self.toggle_flag(Flags::N, false);
-        self.toggle_flag(Flags::H, false);
-        self.toggle_flag(Flags::C, (reg_value & 0x1) == 1);
+        self.toggle_flag(Flag::Z, res == 0);
+        self.toggle_flag(Flag::N, false);
+        self.toggle_flag(Flag::H, false);
+        self.toggle_flag(Flag::C, (reg_value & 0x1) == 1);
 
         self.clock.advance(2);
 
@@ -909,10 +906,10 @@ impl Cpu {
 
         self.write_register(hardware, *reg, res);
 
-        self.toggle_flag(Flags::Z, res == 0);
-        self.toggle_flag(Flags::N, false);
-        self.toggle_flag(Flags::H, false);
-        self.toggle_flag(Flags::C, (reg_value & 0x1) == 1);
+        self.toggle_flag(Flag::Z, res == 0);
+        self.toggle_flag(Flag::N, false);
+        self.toggle_flag(Flag::H, false);
+        self.toggle_flag(Flag::C, (reg_value & 0x1) == 1);
 
         self.clock.advance(2);
 
@@ -927,10 +924,10 @@ impl Cpu {
 
         self.write_register(hardware, *reg, res);
 
-        self.toggle_flag(Flags::Z, res == 0);
-        self.toggle_flag(Flags::N, false);
-        self.toggle_flag(Flags::H, false);
-        self.toggle_flag(Flags::C, (reg_value >> 7) == 1);
+        self.toggle_flag(Flag::Z, res == 0);
+        self.toggle_flag(Flag::N, false);
+        self.toggle_flag(Flag::H, false);
+        self.toggle_flag(Flag::C, (reg_value >> 7) == 1);
 
         self.clock.advance(2);
 
@@ -946,10 +943,10 @@ impl Cpu {
 
         self.write_register(hardware, *reg, res);
 
-        self.toggle_flag(Flags::Z, res == 0);
-        self.toggle_flag(Flags::N, false);
-        self.toggle_flag(Flags::H, false);
-        self.toggle_flag(Flags::C, (reg_value & 0x1) == 1);
+        self.toggle_flag(Flag::Z, res == 0);
+        self.toggle_flag(Flag::N, false);
+        self.toggle_flag(Flag::H, false);
+        self.toggle_flag(Flag::C, (reg_value & 0x1) == 1);
 
         self.clock.advance(2);
 
@@ -964,10 +961,10 @@ impl Cpu {
 
         self.write_register(hardware, *reg, res);
 
-        self.toggle_flag(Flags::Z, res == 0);
-        self.toggle_flag(Flags::N, false);
-        self.toggle_flag(Flags::H, false);
-        self.toggle_flag(Flags::C, (reg_value & 0x1) == 1);
+        self.toggle_flag(Flag::Z, res == 0);
+        self.toggle_flag(Flag::N, false);
+        self.toggle_flag(Flag::H, false);
+        self.toggle_flag(Flag::C, (reg_value & 0x1) == 1);
 
         self.clock.advance(2);
 
@@ -984,10 +981,10 @@ impl Cpu {
 
         self.write_register(hardware, *reg, res);
 
-        self.toggle_flag(Flags::Z, res == 0);
-        self.toggle_flag(Flags::N, false);
-        self.toggle_flag(Flags::H, false);
-        self.toggle_flag(Flags::C, false);
+        self.toggle_flag(Flag::Z, res == 0);
+        self.toggle_flag(Flag::N, false);
+        self.toggle_flag(Flag::H, false);
+        self.toggle_flag(Flag::C, false);
 
         self.clock.advance(2);
 
@@ -1525,20 +1522,20 @@ impl Cpu {
   /// Returns whether the following [`ConditionalFlag`] is set.
   fn is_conditional_flag_set(&self, cond_flag: ConditionalFlag) -> bool {
     match cond_flag {
-      ConditionalFlag::Z => self.is_flag_set(Flags::Z),
-      ConditionalFlag::C => self.is_flag_set(Flags::C),
-      ConditionalFlag::NZ => !self.is_flag_set(Flags::Z),
-      ConditionalFlag::NC => !self.is_flag_set(Flags::C),
+      ConditionalFlag::Z => self.is_flag_set(Flag::Z),
+      ConditionalFlag::C => self.is_flag_set(Flag::C),
+      ConditionalFlag::NZ => !self.is_flag_set(Flag::Z),
+      ConditionalFlag::NC => !self.is_flag_set(Flag::C),
     }
   }
 
   /// Returns whether or not the [`Flags`] is set.
-  fn is_flag_set(&self, flags: Flags) -> bool {
+  fn is_flag_set(&self, flags: Flag) -> bool {
     (self.flags & flags as u8) == flags as u8
   }
 
   /// Conditionally toggles the flag.
-  fn toggle_flag(&mut self, flags: Flags, condition: bool) {
+  fn toggle_flag(&mut self, flags: Flag, condition: bool) {
     if condition {
       self.flags |= flags as u8;
     } else {
@@ -1547,7 +1544,7 @@ impl Cpu {
   }
 
   /// Sets the following [`Flags`].
-  fn set_flag(&mut self, flags: Flags) {
+  fn set_flag(&mut self, flags: Flag) {
     self.flags |= flags as u8;
   }
 }

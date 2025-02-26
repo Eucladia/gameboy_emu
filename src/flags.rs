@@ -1,6 +1,6 @@
 /// Possible flags that get set after executing an instruction.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum Flags {
+pub enum Flag {
   /// The zero flag.
   Z = 1 << 7,
   /// The subtraction flag.
