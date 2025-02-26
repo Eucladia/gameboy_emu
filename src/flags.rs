@@ -1,26 +1,26 @@
-/// Possible flags that get set after executing an instruction.
+/// The CPU flags that may get affected after executing an instruction.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum Flag {
   /// The zero flag.
   Z = 1 << 7,
   /// The subtraction flag.
   N = 1 << 6,
-  /// The half-carry flag, indicating whether there was a carry over the nibbles.
+  /// The half-carry flag.
   H = 1 << 5,
   /// The carry flag.
   C = 1 << 4,
 }
 
-/// Flags that conditional instructions use.
+/// A condition that an instruction can use for control flow.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum ConditionalFlag {
-  /// The condtion is true if [`Flags::Z`] is set, aka a zero was produced.
+  /// Continues control flow if a zero was produced.
   Z,
-  /// The condtion is true if [`Flags::C`] is set, aka a carry was produced.
+  /// Continues control flow if a carry was produced.
   C,
-  /// The condtion is true if [`Flags::Z`] is not set, aka a zero was not produced.
+  /// Continues control flow if a carry was not produced.
   NZ,
-  /// The condtion is true if [`Flags::C`] is not set, aka a carry was not produced.
+  /// Continues control flow if a carry was not produced.
   NC,
 }
 
