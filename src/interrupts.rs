@@ -41,13 +41,13 @@ impl Interrupts {
 
   /// Sets the internal enabled interrupts to the following value.
   pub fn set_enabled(&mut self, value: u8) {
-    self.enabled = value & 0b11111
+    self.enabled = value & 0b1_1111
   }
 
   /// Returns a bitfield of the enabled interrupts.
   pub fn enabled_bitfield(&self) -> u8 {
     // Only the first 5 bits have flags
-    self.enabled & 0b11111
+    self.enabled & 0b1_1111
   }
 
   /// Checks if the following [`Interrupt`] was requested.
@@ -62,7 +62,7 @@ impl Interrupts {
 
   /// Updates the requested interrupts to the following value.
   pub fn set_requested(&mut self, value: u8) {
-    self.requested |= value & 0b11111;
+    self.requested |= value & 0b1_1111;
   }
 
   /// Clears a requested [`Interrupt`].
@@ -72,6 +72,6 @@ impl Interrupts {
 
   /// Returns a bitfield of the requested interrupts.
   pub fn requested_bitfield(&self) -> u8 {
-    self.requested & 0b11111
+    self.requested & 0b1_1111
   }
 }
