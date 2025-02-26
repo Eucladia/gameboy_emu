@@ -104,6 +104,7 @@ impl Default for Registers {
 impl TryFrom<u8> for Register {
   type Error = ();
 
+  /// Attempts to convert the byte into a [`Register`].
   fn try_from(value: u8) -> Result<Self, Self::Error> {
     Ok(match value {
       0b000 => Register::B,
