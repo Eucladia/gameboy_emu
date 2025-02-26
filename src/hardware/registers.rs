@@ -70,15 +70,15 @@ impl Register {
 }
 
 impl RegisterPair {
-  // Gets a register pair from 2 bits. If `use_af` is true, then `0b11` will
+  // Gets a register pair from 2 bits. If `psw` is true, then `0b11` will
   // return [`RegisterPair::AF`] instead of [`RegisterPair::SP`].
-  pub fn from_bits(bits: u8, use_af: bool) -> Option<Self> {
+  pub fn from_bits(bits: u8, use_psw: bool) -> Option<Self> {
     Some(match bits {
       0b00 => RegisterPair::BC,
       0b01 => RegisterPair::DE,
       0b10 => RegisterPair::HL,
-      0b11 if use_af => RegisterPair::AF,
-      0b11 if !use_af => RegisterPair::SP,
+      0b11 if use_psw => RegisterPair::AF,
+      0b11 => RegisterPair::SP,
       _ => return None,
     })
   }
