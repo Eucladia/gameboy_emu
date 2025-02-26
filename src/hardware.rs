@@ -7,6 +7,7 @@ pub mod timer;
 
 pub use cpu::Cpu;
 pub use joypad::Joypad;
+use ppu::Ppu;
 pub use timer::Timer;
 
 use crate::{
@@ -18,12 +19,16 @@ use crate::{
 pub struct Hardware {
   /// The internal memory available.
   memory: [u8; MEMORY_SIZE as usize],
+  /// The high ram.
+  high_ram: [u8; HIGH_RAM_SIZE as usize],
   /// The input joypad.
   joypad: Joypad,
   /// The game cartridge.
   cartridge: Cartridge,
   /// The timer.
   timer: Timer,
+  /// The pixel processing unit.
+  ppu: Ppu,
   /// The set interrupts
   interrupts: Interrupts,
 }
@@ -37,8 +42,10 @@ impl Hardware {
 
     Self {
       memory: [0; MEMORY_SIZE as usize],
+      high_ram: [0; HIGH_RAM_SIZE as usize],
       joypad: Joypad::new(),
       timer: Timer::new(),
+      ppu: Ppu::new(),
       interrupts: Interrupts::new(),
       cartridge,
     }
@@ -52,9 +59,7 @@ impl Hardware {
       // ROM, bank N
       ROM_BANK_N_START..ROM_BANK_N_END => self.cartridge.read_rom(address),
       // Video RAM
-      VIDEO_RAM_START..VIDEO_RAM_END => {
-        self.memory[(VIDEO_RAM_OFFSET + (address - VIDEO_RAM_START)) as usize]
-      }
+      VIDEO_RAM_START..VIDEO_RAM_END => self.ppu.read_ram(address - VIDEO_RAM_START),
       // External RAM
       EXTERNAL_RAM_START..EXTERNAL_RAM_END => self.cartridge.read_ram(address),
       // Work RAM
@@ -66,15 +71,13 @@ impl Hardware {
         self.memory[(WORK_RAM_OFFSET + (address - ECHO_RAM_START)) as usize]
       }
       // Sprite memory
-      OAM_START..OAM_END => self.memory[(OAM_OFFSET + (address - OAM_START)) as usize],
+      OAM_START..OAM_END => self.ppu.read_oam(address - OAM_START),
       // Unused
       UNUSED_START..UNUSED_END => 0xFF,
       // I/O Registers
       IO_REGISTER_START..IO_REGISTER_END => self.read_io_register(address),
       // High RAM
-      HIGH_RAM_START..HIGH_RAM_END => {
-        self.memory[(HIGH_RAM_OFFSET + (address - HIGH_RAM_START)) as usize]
-      }
+      HIGH_RAM_START..HIGH_RAM_END => self.high_ram[(address - HIGH_RAM_START) as usize],
       // Interrupt enable register
       INTERRUPT_ENABLE_REGISTER => self.interrupts.enabled_bitfield(),
     }
@@ -96,9 +99,7 @@ impl Hardware {
       // Switchable ROM bank
       ROM_BANK_N_START..ROM_BANK_N_END => self.cartridge.write_rom(address, value),
       // Video RAM
-      VIDEO_RAM_START..VIDEO_RAM_END => {
-        self.memory[(VIDEO_RAM_OFFSET + (address - VIDEO_RAM_START)) as usize] = value
-      }
+      VIDEO_RAM_START..VIDEO_RAM_END => self.ppu.write_ram(address - VIDEO_RAM_START, value),
       // External RAM
       EXTERNAL_RAM_START..EXTERNAL_RAM_END => self.cartridge.write_ram(address, value),
       // Work RAM
@@ -116,9 +117,7 @@ impl Hardware {
       // I/O Registers
       IO_REGISTER_START..IO_REGISTER_END => self.write_io_register(address, value),
       // High RAM
-      HIGH_RAM_START..HIGH_RAM_END => {
-        self.memory[(HIGH_RAM_OFFSET + (address - HIGH_RAM_START)) as usize] = value
-      }
+      HIGH_RAM_START..HIGH_RAM_END => self.high_ram[(address - HIGH_RAM_START) as usize] = value,
       // Interrupt enable register
       INTERRUPT_ENABLE_REGISTER => self.interrupts.set_enabled(value),
     }
@@ -128,6 +127,7 @@ impl Hardware {
     match address {
       JOYPAD_REGISTER => self.joypad.read(),
       TIMER_REGISTER_START..TIMER_REGISTER_END => self.timer.read(address),
+      PPU_REGISTER_START..PPU_REGISTER_END => self.ppu.read_register(address),
       INTERRUPT_FLAG => self.interrupts.requested_bitfield(),
       _ => todo!("Other registers"),
     }
@@ -137,6 +137,7 @@ impl Hardware {
     match address {
       JOYPAD_REGISTER => self.joypad.write(value),
       TIMER_REGISTER_START..TIMER_REGISTER_END => self.timer.write(address, value),
+      PPU_REGISTER_START..PPU_REGISTER_END => self.ppu.write_register(address, value),
       INTERRUPT_FLAG => self.interrupts.set_requested(value),
       _ => todo!("Other registers"),
     }
@@ -195,6 +196,10 @@ const INTERRUPT_ENABLE_REGISTER: u16 = 0xFFFF;
 const TIMER_REGISTER_START: u16 = 0xFF04;
 /// The ending address fo the timer register.
 const TIMER_REGISTER_END: u16 = 0xFF08;
+/// The starting address of the PPU register.
+const PPU_REGISTER_START: u16 = 0xFF40;
+/// The ending address of the PPU register.
+const PPU_REGISTER_END: u16 = 0xFF4B;
 
 const VIDEO_RAM_SIZE: u16 = VIDEO_RAM_END - VIDEO_RAM_START;
 const WORK_RAM_SIZE: u16 = WORK_RAM_END - WORK_RAM_START;
@@ -202,7 +207,7 @@ const OAM_SIZE: u16 = OAM_END - OAM_START;
 const HIGH_RAM_SIZE: u16 = HIGH_RAM_END - HIGH_RAM_START;
 const INTERRUPT_ENABLE_REGISTER_SIZE: u16 = 1;
 
-const MEMORY_SIZE: u16 = VIDEO_RAM_SIZE + WORK_RAM_SIZE + OAM_SIZE + HIGH_RAM_SIZE;
+const MEMORY_SIZE: u16 = WORK_RAM_SIZE + HIGH_RAM_SIZE;
 
 const VIDEO_RAM_OFFSET: u16 = 0;
 const WORK_RAM_OFFSET: u16 = VIDEO_RAM_OFFSET + VIDEO_RAM_SIZE;
