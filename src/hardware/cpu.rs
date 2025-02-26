@@ -5,11 +5,14 @@ use crate::{
   instructions::{Instruction, Operand},
 };
 
-/// The possible states of the CPU.
+/// A state that the CPU can be in.
 #[derive(Debug, Copy, Clone)]
 pub enum CpuState {
+  /// The CPU was running.
   Running,
+  /// The CPU was marked as halted.
   Halted,
+  /// The cpu was marked as stopped.
   Stopped,
 }
 
@@ -1002,14 +1005,14 @@ impl Cpu {
     match byte {
       // LD r8, r8
       0x40..0x76 | 0x77..=0x7F => {
-        let dest_reg = Register::from_bits((byte >> 3) & 0b111).unwrap();
-        let src_reg = Register::from_bits(byte & 0b111).unwrap();
+        let dest_reg = Register::from_bits((byte >> 3) & 0x7).unwrap();
+        let src_reg = Register::from_bits(byte & 0x7).unwrap();
 
         Instruction::LD(Operand::Register(dest_reg), Operand::Register(src_reg))
       }
       // LD r16, n16
       0x01 | 0x11 | 0x21 | 0x31 => {
-        let r16 = RegisterPair::from_bits((byte >> 4) & 0b11, false).unwrap();
+        let r16 = RegisterPair::from_bits((byte >> 4) & 0x3, false).unwrap();
         let n16 = hardware.read_word(self.registers.pc);
 
         Instruction::LD(Operand::RegisterPair(r16), Operand::Word(n16))
@@ -1051,7 +1054,7 @@ impl Cpu {
       }
       // LD r8 | [HL], n8
       0x06 | 0x16 | 0x26 | 0x36 | 0x0E | 0x1E | 0x2E | 0x3E => {
-        let dest_reg = Register::from_bits((byte >> 3) & 0b111).unwrap();
+        let dest_reg = Register::from_bits((byte >> 3) & 0x7).unwrap();
         let n8 = hardware.read_byte(self.registers.pc);
 
         Instruction::LD(Operand::Register(dest_reg), Operand::Byte(n8))
@@ -1126,7 +1129,7 @@ impl Cpu {
       ),
       // ADC A, r8 | [HL]
       0x88..=0x8F => {
-        let src_reg = Register::from_bits(byte & 0b111).unwrap();
+        let src_reg = Register::from_bits(byte & 0x7).unwrap();
 
         Instruction::ADC(Operand::Register(Register::A), Operand::Register(src_reg))
       }
@@ -1138,7 +1141,7 @@ impl Cpu {
       }
       // ADD A, r8 | [HL]
       0x80..=0x87 => {
-        let src_reg = Register::from_bits(byte & 0b111).unwrap();
+        let src_reg = Register::from_bits(byte & 0x7).unwrap();
 
         Instruction::ADD(Operand::Register(Register::A), Operand::Register(src_reg))
       }
@@ -1150,7 +1153,7 @@ impl Cpu {
       }
       // ADD HL, r16
       0x09 | 0x19 | 0x29 | 0x39 => {
-        let r16 = RegisterPair::from_bits((byte >> 4) & 0b11, false).unwrap();
+        let r16 = RegisterPair::from_bits((byte >> 4) & 0x3, false).unwrap();
 
         Instruction::ADD(
           Operand::RegisterPair(RegisterPair::HL),
@@ -1165,7 +1168,7 @@ impl Cpu {
       }
       // AND A, r8 | [HL]
       0xA0..=0xA7 => {
-        let src_reg = Register::from_bits(byte & 0b111).unwrap();
+        let src_reg = Register::from_bits(byte & 0x7).unwrap();
 
         Instruction::AND(Operand::Register(Register::A), Operand::Register(src_reg))
       }
@@ -1177,7 +1180,7 @@ impl Cpu {
       }
       // CP A, r8 | [HL]
       0xB8..=0xBF => {
-        let src_reg = Register::from_bits(byte & 0b111).unwrap();
+        let src_reg = Register::from_bits(byte & 0x7).unwrap();
 
         Instruction::CP(Operand::Register(Register::A), Operand::Register(src_reg))
       }
@@ -1189,31 +1192,31 @@ impl Cpu {
       }
       // DEC r8
       0x05 | 0x15 | 0x25 | 0x35 | 0x0D | 0x1D | 0x2D | 0x3D => {
-        let dst_reg = Register::from_bits((byte >> 3) & 0b111).unwrap();
+        let dst_reg = Register::from_bits((byte >> 3) & 0x7).unwrap();
 
         Instruction::DEC(Operand::Register(dst_reg))
       }
       // DEC r16
       0x0B | 0x1B | 0x2B | 0x3B => {
-        let r16 = RegisterPair::from_bits((byte >> 4) & 0b11, false).unwrap();
+        let r16 = RegisterPair::from_bits((byte >> 4) & 0x3, false).unwrap();
 
         Instruction::DEC(Operand::RegisterPair(r16))
       }
       // INC r8
       0x04 | 0x14 | 0x24 | 0x34 | 0x0C | 0x1C | 0x2C | 0x3C => {
-        let dst_reg = Register::from_bits((byte >> 3) & 0b111).unwrap();
+        let dst_reg = Register::from_bits((byte >> 3) & 0x7).unwrap();
 
         Instruction::INC(Operand::Register(dst_reg))
       }
       // INC r16
       0x03 | 0x13 | 0x23 | 0x33 => {
-        let r16 = RegisterPair::from_bits((byte >> 4) & 0b11, false).unwrap();
+        let r16 = RegisterPair::from_bits((byte >> 4) & 0x3, false).unwrap();
 
         Instruction::INC(Operand::RegisterPair(r16))
       }
       // OR A, r8 | [HL]
       0xB0..=0xB7 => {
-        let src_reg = Register::from_bits(byte & 0b111).unwrap();
+        let src_reg = Register::from_bits(byte & 0x7).unwrap();
 
         Instruction::OR(Operand::Register(Register::A), Operand::Register(src_reg))
       }
@@ -1225,7 +1228,7 @@ impl Cpu {
       }
       // SBC A, r8 | [HL]
       0x98..=0x9F => {
-        let src_reg = Register::from_bits(byte & 0b111).unwrap();
+        let src_reg = Register::from_bits(byte & 0x7).unwrap();
 
         Instruction::SBC(Operand::Register(Register::A), Operand::Register(src_reg))
       }
@@ -1237,7 +1240,7 @@ impl Cpu {
       }
       // SUB A, r8 | [HL]
       0x90..=0x97 => {
-        let src_reg = Register::from_bits(byte & 0b111).unwrap();
+        let src_reg = Register::from_bits(byte & 0x7).unwrap();
 
         Instruction::SUB(Operand::Register(Register::A), Operand::Register(src_reg))
       }
@@ -1249,7 +1252,7 @@ impl Cpu {
       }
       // XOR A, r8 | [HL]
       0xA8..=0xAF => {
-        let src_reg = Register::from_bits(byte & 0b111).unwrap();
+        let src_reg = Register::from_bits(byte & 0x7).unwrap();
 
         Instruction::XOR(Operand::Register(Register::A), Operand::Register(src_reg))
       }
@@ -1264,7 +1267,7 @@ impl Cpu {
 
       // CALL cf, n16
       0xC4 | 0xD4 | 0xCC | 0xDC => {
-        let cond_flag = ConditionalFlag::from_bits((byte >> 3) & 0b11).unwrap();
+        let cond_flag = ConditionalFlag::from_bits((byte >> 3) & 0x3).unwrap();
         let n16 = hardware.read_word(self.registers.pc);
 
         Instruction::CALL(Some(Operand::Conditional(cond_flag)), Operand::Word(n16))
@@ -1277,7 +1280,7 @@ impl Cpu {
       }
       // JP cf, n16
       0xC2 | 0xD2 | 0xCA | 0xDA => {
-        let cond_flag = ConditionalFlag::from_bits((byte >> 3) & 0b11).unwrap();
+        let cond_flag = ConditionalFlag::from_bits((byte >> 3) & 0x3).unwrap();
         let n16 = hardware.read_word(self.registers.pc);
 
         Instruction::JP(Some(Operand::Conditional(cond_flag)), Operand::Word(n16))
@@ -1292,7 +1295,7 @@ impl Cpu {
       0xE9 => Instruction::JP(None, Operand::RegisterPair(RegisterPair::HL)),
       // JR cf, n16
       0x20 | 0x30 | 0x28 | 0x38 => {
-        let cond_flag = ConditionalFlag::from_bits((byte >> 3) & 0b11).unwrap();
+        let cond_flag = ConditionalFlag::from_bits((byte >> 3) & 0x3).unwrap();
         let n16 = hardware.read_word(self.registers.pc);
 
         Instruction::JR(Some(Operand::Conditional(cond_flag)), Operand::Word(n16))
@@ -1305,7 +1308,7 @@ impl Cpu {
       }
       // RET cf
       0xC0 | 0xD0 | 0xC8 | 0xD8 => {
-        let cond_flag = ConditionalFlag::from_bits((byte >> 3) & 0b11).unwrap();
+        let cond_flag = ConditionalFlag::from_bits((byte >> 3) & 0x3).unwrap();
 
         Instruction::RET(Some(Operand::Conditional(cond_flag)))
       }
@@ -1316,7 +1319,7 @@ impl Cpu {
       // RST 0x0 | 0x10 | 0x20 | 0x30 | 0x08 | 0x18 | 0x28 | 0x38
       0xC7 | 0xD7 | 0xE7 | 0xF7 | 0xCF | 0xDF | 0xEF | 0xFF => {
         // The target is encoded in bits 3 through 5.
-        let target = byte & 0b111000;
+        let target = byte & 0b11_1000;
 
         Instruction::RST(Operand::Byte(target))
       }
@@ -1334,13 +1337,13 @@ impl Cpu {
 
       // POP r16
       0xC1 | 0xD1 | 0xE1 | 0xF1 => {
-        let r16 = RegisterPair::from_bits((byte >> 4) & 0b11, true).unwrap();
+        let r16 = RegisterPair::from_bits((byte >> 4) & 0x3, true).unwrap();
 
         Instruction::POP(Operand::RegisterPair(r16))
       }
       // PUSH r16
       0xC5 | 0xD5 | 0xE5 | 0xF5 => {
-        let r16 = RegisterPair::from_bits((byte >> 4) & 0b11, true).unwrap();
+        let r16 = RegisterPair::from_bits((byte >> 4) & 0x3, true).unwrap();
 
         Instruction::PUSH(Operand::RegisterPair(r16))
       }
@@ -1372,70 +1375,70 @@ impl Cpu {
         match next_byte {
           // BIT 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7, r8 | [HL]
           0x40..=0x7F => {
-            let bit_num = (next_byte >> 3) & 0b111;
-            let src_reg = Register::from_bits(next_byte & 0b111).unwrap();
+            let bit_num = (next_byte >> 3) & 0x7;
+            let src_reg = Register::from_bits(next_byte & 0x7).unwrap();
 
             Instruction::BIT(Operand::Byte(bit_num), Operand::Register(src_reg))
           }
           // RES 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7, r8 | [HL]
           0x80..=0xBF => {
-            let bit_num = (next_byte >> 3) & 0b111;
-            let src_reg = Register::from_bits(next_byte & 0b111).unwrap();
+            let bit_num = (next_byte >> 3) & 0x7;
+            let src_reg = Register::from_bits(next_byte & 0x7).unwrap();
 
             Instruction::RES(Operand::Byte(bit_num), Operand::Register(src_reg))
           }
           // SET 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7, r8 | [HL]
           0xC0..=0xFF => {
-            let bit_num = (next_byte >> 3) & 0b111;
-            let src_reg = Register::from_bits(next_byte & 0b111).unwrap();
+            let bit_num = (next_byte >> 3) & 0x7;
+            let src_reg = Register::from_bits(next_byte & 0x7).unwrap();
 
             Instruction::SET(Operand::Byte(bit_num), Operand::Register(src_reg))
           }
           // RL r8 | [HL]
           0x10..=0x17 => {
-            let src_reg = Register::from_bits(next_byte & 0b111).unwrap();
+            let src_reg = Register::from_bits(next_byte & 0x7).unwrap();
 
             Instruction::RL(Operand::Register(src_reg))
           }
           // RLC r8 | [HL]
           0x00..=0x07 => {
-            let src_reg = Register::from_bits(next_byte & 0b111).unwrap();
+            let src_reg = Register::from_bits(next_byte & 0x7).unwrap();
 
             Instruction::RLC(Operand::Register(src_reg))
           }
           // RR r8 | [HL]
           0x18..=0x1F => {
-            let src_reg = Register::from_bits(next_byte & 0b111).unwrap();
+            let src_reg = Register::from_bits(next_byte & 0x7).unwrap();
 
             Instruction::RR(Operand::Register(src_reg))
           }
           // RRC r8 | [HL]
           0x08..=0x0F => {
-            let src_reg = Register::from_bits(next_byte & 0b111).unwrap();
+            let src_reg = Register::from_bits(next_byte & 0x7).unwrap();
 
             Instruction::RRC(Operand::Register(src_reg))
           }
           // SLA r8 | [HL]
           0x20..=0x27 => {
-            let src_reg = Register::from_bits(next_byte & 0b111).unwrap();
+            let src_reg = Register::from_bits(next_byte & 0x7).unwrap();
 
             Instruction::SLA(Operand::Register(src_reg))
           }
           // SRA r8 | [HL]
           0x28..=0x2F => {
-            let src_reg = Register::from_bits(next_byte & 0b111).unwrap();
+            let src_reg = Register::from_bits(next_byte & 0x7).unwrap();
 
             Instruction::SRA(Operand::Register(src_reg))
           }
           // SRL r8 | [HL]
           0x38..=0x3F => {
-            let src_reg = Register::from_bits(next_byte & 0b111).unwrap();
+            let src_reg = Register::from_bits(next_byte & 0x7).unwrap();
 
             Instruction::SRL(Operand::Register(src_reg))
           }
           // SWAP r8 | [HL]
           0x30..=0x37 => {
-            let src_reg = Register::from_bits(next_byte & 0b111).unwrap();
+            let src_reg = Register::from_bits(next_byte & 0x7).unwrap();
 
             Instruction::SWAP(Operand::Register(src_reg))
           }
@@ -1559,12 +1562,12 @@ struct ClockState {
 }
 
 impl ClockState {
-  /// Advances the internal clock by 1 machine cycle.
+  /// Advances the internal state by 1 M-cycle.
   pub fn tick(&mut self) {
     self.advance(1);
   }
 
-  /// Advance the internal clock by the following machine cycles.
+  /// Advance the internal state by the following amount of M-cycles.
   pub fn advance(&mut self, m_cycles: usize) {
     self.m_cycles = self.m_cycles.wrapping_add(m_cycles);
     self.t_cycles = self.t_cycles.wrapping_add(m_cycles * 4);

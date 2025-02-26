@@ -127,14 +127,15 @@ impl Ppu {
     self.stat = (self.stat & 0b1111_1100) | (self.mode as u8);
 
     if self.ly == self.lyc {
-      // Set the coincidence flag, which is bit 2
-      self.stat |= 0b100;
+      // Set the coincidence flag
+      self.stat |= 0x4;
 
       if self.stat & 0b0100_0000 == 1 {
         interrupts.request_interrupt(Interrupt::LCD);
       }
     } else {
-      self.stat &= !0b100;
+      // Unset the coincidence flag
+      self.stat &= !0x4;
     }
   }
 

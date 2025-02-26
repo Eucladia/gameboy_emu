@@ -35,8 +35,8 @@ impl Timer {
 
     // Check if the timer is enabled
     if self.tac & 0b100 == 1 {
-      // Parse the frequency of the clock, in T-cycles
-      let threshold = match self.tac & 0b11 {
+      // Parse the frequency, in T-cycles, of the clock out of the 2 lower bits
+      let threshold = match self.tac & 0x3 {
         0b00 => 1024,
         0b01 => 16,
         0b10 => 64,
@@ -75,7 +75,7 @@ impl Timer {
       TIMER_COUNTER_REGISTER => self.tima = value,
       TIMER_MODULO_REGISTER => self.tma = value,
       // Only the first 3 bits are used
-      TIMER_CONTROL_REGISTER => self.tac = value & 0b111,
+      TIMER_CONTROL_REGISTER => self.tac = value & 0x7,
       _ => unreachable!(),
     }
   }

@@ -1,6 +1,7 @@
 // A kind of cartridge.
 #[derive(Debug)]
 pub enum Cartridge {
+  /// A game cartridge that only has 32kB of ROM and no RAM.
   RomOnly(RomOnly),
 }
 
@@ -31,7 +32,7 @@ impl Cartridge {
   /// Writes to the value to address in RAM.
   pub fn write_ram(&mut self, address: u16, value: u8) {
     match self {
-      // No-op because this cartridge has no RAM
+      // No-op because this cartridge type has no RAM
       Cartridge::RomOnly(_) => {}
     }
   }
@@ -40,6 +41,8 @@ impl Cartridge {
 /// A cartridge that only has ROM and no memory bank controller.
 #[derive(Debug)]
 pub struct RomOnly {
+  /// The ROM of the cartridge.
+  // NOTE: Can't we make this an array of 32kB since this game has a fixed amount of ROM?
   rom: Vec<u8>,
 }
 
@@ -50,7 +53,6 @@ impl RomOnly {
 
   /// Reads from the ROM.
   pub fn read_rom(&self, address: u16) -> u8 {
-    // Return 0xFF for unmapped memory
-    self.rom.get(address as usize).copied().unwrap_or(0xFF)
+    self.rom.get(address as usize).copied().unwrap()
   }
 }
