@@ -59,7 +59,7 @@ impl Hardware {
       // ROM, bank N
       ROM_BANK_N_START..ROM_BANK_N_END => self.cartridge.read_rom(address),
       // Video RAM
-      VIDEO_RAM_START..VIDEO_RAM_END => self.ppu.read_ram(address - VIDEO_RAM_START),
+      VIDEO_RAM_START..VIDEO_RAM_END => self.ppu.read_ram(address),
       // External RAM
       EXTERNAL_RAM_START..EXTERNAL_RAM_END => self.cartridge.read_ram(address),
       // Work RAM
@@ -71,7 +71,7 @@ impl Hardware {
         self.memory[(WORK_RAM_OFFSET + (address - ECHO_RAM_START)) as usize]
       }
       // Sprite memory
-      OAM_START..OAM_END => self.ppu.read_oam(address - OAM_START),
+      OAM_START..OAM_END => self.ppu.read_oam(address),
       // Unused
       UNUSED_START..UNUSED_END => 0xFF,
       // I/O Registers
@@ -99,7 +99,7 @@ impl Hardware {
       // Switchable ROM bank
       ROM_BANK_N_START..ROM_BANK_N_END => self.cartridge.write_rom(address, value),
       // Video RAM
-      VIDEO_RAM_START..VIDEO_RAM_END => self.ppu.write_ram(address - VIDEO_RAM_START, value),
+      VIDEO_RAM_START..VIDEO_RAM_END => self.ppu.write_ram(address, value),
       // External RAM
       EXTERNAL_RAM_START..EXTERNAL_RAM_END => self.cartridge.write_ram(address, value),
       // Work RAM
@@ -111,7 +111,7 @@ impl Hardware {
         self.memory[(WORK_RAM_OFFSET + (address - ECHO_RAM_START)) as usize] = value
       }
       // Sprite memory
-      OAM_START..OAM_END => self.memory[(OAM_OFFSET + (address - OAM_START)) as usize] = value,
+      OAM_START..OAM_END => self.ppu.write_oam(address, value),
       // Unused
       UNUSED_START..UNUSED_END => {}
       // I/O Registers

@@ -7,6 +7,8 @@ pub struct Ppu {
   memory: [u8; VIDEO_RAM_SIZE as usize],
   /// The object attribute map.
   oam: [u8; OAM_SIZE as usize],
+  /// The frame buffer.
+  buffer: [[u8; 160]; 144],
 
   /// The LCD byte that controls what gets shown on the screen.
   lcdc: u8,
@@ -16,8 +18,10 @@ pub struct Ppu {
   scy: u8,
   /// Scroll X.
   scx: u8,
-  /// LCDC Y-Coordinate aka the current scan line.
+  /// LCDC Y-Coordinate aka the current scanline.
   ly: u8,
+  /// The window's scanline. See https://gbdev.io/pandocs/Tile_Maps.html#window.
+  window_line: u8,
   /// LY Compare.
   lyc: u8,
   /// Background and Window palette.
@@ -71,6 +75,7 @@ impl Ppu {
       scy: 0,
       scx: 0,
       ly: 0,
+      window_line: 0,
       lyc: 0,
       bgp: 0,
       obp0: 0,
@@ -85,11 +90,12 @@ impl Ppu {
 
       memory: [0; VIDEO_RAM_SIZE as usize],
       oam: [0; OAM_SIZE as usize],
+      buffer: [[0; 160]; 144],
     }
   }
 
   /// Steps a cycle.
-  pub fn step(&mut self, cycles: usize, interrupts: &mut Interrupts) {
+  pub fn step(&mut self, interrupts: &mut Interrupts, cycles: usize) {
     self.counter += cycles;
 
     match self.mode {
@@ -105,6 +111,7 @@ impl Ppu {
         if self.counter >= PIXEL_TRANSFER_CYCLE_COUNT {
           self.counter -= OAM_CYCLE_COUNT;
           self.mode = PpuMode::HBlank;
+          self.render_scanline();
         }
       }
       // HBlank last for 204 cycles
@@ -150,6 +157,13 @@ impl Ppu {
     } else {
       // Unset the coincidence flag
       self.stat &= !0x4;
+    }
+
+    // Increment the window scanline only if it's visible
+    if self.ly >= self.wy {
+      self.window_line = self.window_line.wrapping_add(1);
+    } else {
+      self.window_line = 0;
     }
   }
 
@@ -200,22 +214,154 @@ impl Ppu {
 
   /// Reads the 8-bit value in memory at the provided address.
   pub fn read_ram(&self, address: u16) -> u8 {
-    self.memory[address as usize]
+    self.memory[(address - 0x8000) as usize]
   }
 
   /// Writes 8-bits of memory to the provided address.
   pub fn write_ram(&mut self, address: u16, value: u8) {
-    self.memory[address as usize] = value;
+    self.memory[(address - 0x8000) as usize] = value;
   }
 
   /// Reads 8-bits of OAM memory at the provided address.
   pub fn read_oam(&self, address: u16) -> u8 {
-    self.oam[address as usize]
+    self.oam[(address - 0xFE00) as usize]
   }
 
   /// Writes 8-bits of OAM memory to the provided address.
   pub fn write_oam(&mut self, address: u16, value: u8) {
-    self.oam[address as usize] = value;
+    self.oam[(address - 0xFE00) as usize] = value;
+  }
+
+  /// Renders a scanline
+  fn render_scanline(&mut self) {
+    // The MSB of `lcdc` determines whether there should be any output to the window.
+    if self.lcdc & 0x80 == 0 {
+      return;
+    }
+
+    let mut scanline = [0; 160];
+
+    // The LSB determines whether the background should be drawn
+    if self.lcdc & 0x01 == 1 {
+      self.render_background(&mut scanline);
+    }
+
+    // The 5th bit determines whether the window should be drawn
+    if self.lcdc & 0x20 == 1 {
+      self.render_window(&mut scanline);
+    }
+
+    // The 2nd bit determines whether the sprites should be drawn
+    if self.lcdc & 0x02 == 1 {
+      self.render_sprites(&mut scanline);
+    }
+
+    self.buffer[self.ly as usize] = scanline;
+  }
+
+  fn render_background(&self, scanline: &mut [u8; 160]) {
+    let base_tilemap = if self.lcdc & 0x08 == 0 {
+      0x9800
+    } else {
+      0x9C00
+    };
+
+    let y = self.ly.wrapping_add(self.scy) as usize;
+    let tile_row = (y / 8) * 32;
+
+    for x in 0_u8..160 {
+      let x_pos = x.wrapping_add(self.scx) as usize;
+      let tile_col = x_pos / 8;
+      let tile_index = self.memory[base_tilemap - 0x8000 + tile_row + tile_col] as usize;
+
+      let tile_addr = 0x8000 + (tile_index * 16);
+      let row_offset = (y % 8) * 2;
+
+      let low = self.memory[tile_addr - 0x8000 + row_offset];
+      let high = self.memory[tile_addr - 0x8000 + row_offset + 1];
+
+      let bit = 7 - (x_pos % 8);
+      let color = ((high >> bit) & 1) << 1 | ((low >> bit) & 1);
+
+      scanline[x as usize] = color;
+    }
+  }
+
+  fn render_window(&self, scanline: &mut [u8; 160]) {
+    // Don't draw if its out of the bounds of the current scanline
+    if self.ly < self.wy {
+      return;
+    }
+
+    let base_tilemap = if self.lcdc & 0x40 == 0 {
+      0x9800
+    } else {
+      0x9C00
+    };
+
+    // The window is drawn starting from `WX - 7`
+    let window_x_start = self.wx.saturating_sub(7);
+    let window_y = self.window_line;
+    // Tiles are arranged in rows of 32 for the window.
+    let tile_row_offset = (window_y as usize / 8) * 32;
+
+    for screen_x in window_x_start..160 {
+      let window_x = screen_x - window_x_start;
+      let tile_col = (window_x as usize) / 8;
+      let tilemap_index = (base_tilemap - 0x8000) + tile_row_offset + tile_col;
+      let tile_index = self.memory[tilemap_index] as usize;
+
+      // Each tile takes 16 bytes (8x8 pixels, 2 bytes per row)
+      let tile_addr = 0x8000 + (tile_index * 16);
+
+      let row_offset = (window_y as usize % 8) * 2;
+
+      let low = self.memory[tile_addr - 0x8000 + row_offset];
+      let high = self.memory[tile_addr - 0x8000 + row_offset + 1];
+
+      let bit = 7 - (window_x % 8);
+      let color = ((high >> bit) & 1) << 1 | ((low >> bit) & 1);
+
+      scanline[screen_x as usize] = color;
+    }
+  }
+
+  fn render_sprites(&self, scanline: &mut [u8; 160]) {
+    // TODO: Handle sprite attributes
+    // TODO: We're supposed to only handle 10 sprite objects. Invisible objects due to an
+    // x-coordinate being off-screen still counts! Only out of bound y-coordinate sprite
+    // objects don't count.
+    for i in 0..40 {
+      let sprite_index = i * 4;
+      let y = self.oam[sprite_index] as i16 - 16;
+      let x = self.oam[sprite_index + 1] as i16 - 8;
+      let tile_index = self.oam[sprite_index + 2] as usize;
+
+      if self.ly < y as u8 || self.ly >= y as u8 + 8 {
+        continue;
+      }
+
+      let tile_addr = 0x8000 + (tile_index * 16);
+      let row_offset = ((self.ly - y as u8) * 2) as usize;
+      let low = self.memory[tile_addr - 0x8000 + row_offset];
+      let high = self.memory[tile_addr - 0x8000 + row_offset + 1];
+
+      for x_offset in 0..8 {
+        let bit = 7 - x_offset;
+        let color = ((high >> bit) & 1) << 1 | ((low >> bit) & 1);
+
+        if color == 0 {
+          continue;
+        }
+
+        let screen_x = x + x_offset as i16;
+        if screen_x < 0 || screen_x >= 160 {
+          continue;
+        }
+
+        scanline[screen_x as usize] = color;
+      }
+    }
   }
 }
 
