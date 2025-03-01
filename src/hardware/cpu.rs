@@ -12,7 +12,7 @@ pub enum CpuState {
   Running,
   /// The CPU was marked as halted.
   Halted,
-  /// The cpu was marked as stopped.
+  /// The CPU was marked as stopped.
   Stopped,
 }
 
@@ -63,7 +63,19 @@ impl Cpu {
 
   /// Fetches the next instruction byte.
   pub fn fetch_instruction(&self, hardware: &Hardware) -> u8 {
-    hardware.read_byte(self.registers.pc)
+    // If we have a DMA transfer and we're not in high ram,
+    // then the next instruction byte being fetched is the current byte
+    // being transferred by the DMA transfer
+    let next_byte = match hardware.get_dma_transfer() {
+      Some(super::ppu::DmaTransfer::Transferring { current_pos: index })
+        if self.registers.pc < 0xFF80 =>
+      {
+        (*index as u16) << 8
+      }
+      _ => self.registers.pc,
+    };
+
+    hardware.read_byte(next_byte)
   }
 
   /// Executes the [`Instruction`], updating the internal clock state.

@@ -30,13 +30,27 @@ pub struct Ppu {
   wy: u8,
   /// Window X position.
   wx: u8,
-  /// The last value set when executing a DMA transfer,
-  dma: u8,
+  /// The mode that the PPU is in.
+  mode: PpuMode,
+
   /// Internal counter for tracking cycles.
   counter: usize,
 
-  /// The mode that the PPU is in.
-  mode: PpuMode,
+  /// The last value set when executing a DMA transfer,
+  pub dma: u8,
+  /// The current DMA transfer.
+  pub dma_transfer: Option<DmaTransfer>,
+}
+
+/// The state of a direct memory transfer.
+#[derive(Debug, Clone)]
+pub enum DmaTransfer {
+  /// A DMA transfer was requested.
+  Requested,
+  /// A DMA transfer is going to begin.
+  Starting,
+  /// A DMA transfer is in progress.
+  Transferring { current_pos: u8 },
 }
 
 /// The different modes the PPU can be in.
@@ -63,11 +77,11 @@ impl Ppu {
       obp1: 0,
       wy: 0,
       wx: 0,
+      mode: PpuMode::OamScan,
+      counter: 0,
 
       dma: 0,
-
-      counter: 0,
-      mode: PpuMode::OamScan,
+      dma_transfer: None,
 
       memory: [0; VIDEO_RAM_SIZE as usize],
       oam: [0; OAM_SIZE as usize],
@@ -168,7 +182,13 @@ impl Ppu {
       // Writing to LY resets it
       0xFF44 => self.ly = 0,
       0xFF45 => self.lyc = value,
-      0xFF46 => self.dma = value,
+      0xFF46 => {
+        self.dma = value;
+
+        if address == 0xFF46 {
+          self.dma_transfer = Some(DmaTransfer::Requested);
+        }
+      }
       0xFF47 => self.bgp = value,
       0xFF48 => self.obp0 = value,
       0xFF49 => self.obp1 = value,
@@ -201,7 +221,7 @@ impl Ppu {
 
 /// The amount of memory available to the PPU.
 const VIDEO_RAM_SIZE: u16 = 0x2000;
-/// The amount of memory availabkle for the sprites
+/// The amount of memory availabkle for the sprites.
 const OAM_SIZE: u16 = 0xA0;
 /// The number of cycles it takes for OAM.
 const OAM_CYCLE_COUNT: usize = 80;

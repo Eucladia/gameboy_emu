@@ -7,11 +7,11 @@ pub mod timer;
 
 pub use cpu::Cpu;
 pub use joypad::Joypad;
-use ppu::Ppu;
 pub use timer::Timer;
 
 use crate::{
   hardware::cartridge::{Cartridge, RomOnly},
+  hardware::ppu::{DmaTransfer, Ppu},
   interrupts::Interrupts,
 };
 
@@ -121,6 +121,47 @@ impl Hardware {
       // Interrupt enable register
       INTERRUPT_ENABLE_REGISTER => self.interrupts.set_enabled(value),
     }
+  }
+
+  pub fn update_dma_transfer(&mut self, cycles: usize) {
+    match self.ppu.dma_transfer {
+      Some(DmaTransfer::Requested) => {
+        // There's a delay of 1 M-cycle when executing DMA, so we have a filler state
+        self.ppu.dma_transfer = Some(DmaTransfer::Starting);
+      }
+      Some(DmaTransfer::Starting) => {
+        self.ppu.dma_transfer = Some(DmaTransfer::Transferring { current_pos: 0 });
+      }
+      Some(DmaTransfer::Transferring { current_pos }) => {
+        let mut index = current_pos as u16;
+        let starting_address = (self.ppu.dma as u16) << 8;
+        let ending_address = starting_address + 160;
+        let remaining_bytes = ending_address - index;
+        let iterations = (cycles as u16 / 4).min(remaining_bytes);
+
+        for _ in 0..iterations {
+          let src = self.read_byte(starting_address + index);
+
+          self.write_byte(0xFE00 + index, src);
+
+          index += 1;
+        }
+
+        if index >= 160 {
+          self.ppu.dma_transfer = None;
+        } else {
+          self.ppu.dma_transfer = Some(DmaTransfer::Transferring {
+            current_pos: index as u8,
+          })
+        }
+      }
+      None => {}
+    }
+  }
+
+  /// Gets the active DMA transfer.
+  pub fn get_dma_transfer(&self) -> Option<&DmaTransfer> {
+    self.ppu.dma_transfer.as_ref()
   }
 
   fn read_io_register(&self, address: u16) -> u8 {
