@@ -198,10 +198,7 @@ impl Ppu {
       0xFF45 => self.lyc = value,
       0xFF46 => {
         self.dma = value;
-
-        if address == 0xFF46 {
-          self.dma_transfer = Some(DmaTransfer::Requested);
-        }
+        self.dma_transfer = Some(DmaTransfer::Requested);
       }
       0xFF47 => self.bgp = value,
       0xFF48 => self.obp0 = value,
