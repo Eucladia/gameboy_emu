@@ -1,4 +1,7 @@
-use crate::interrupts::{Interrupt, Interrupts};
+use crate::{
+  interrupts::{Interrupt, Interrupts},
+  is_flag_set,
+};
 
 /// The pixel processing unit.
 #[derive(Debug)]
@@ -44,6 +47,46 @@ pub struct Ppu {
   pub dma: u8,
   /// The current DMA transfer.
   pub dma_transfer: Option<DmaTransfer>,
+}
+
+/// Attributes that sprites can have.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[repr(u8)]
+enum SpriteAttributes {
+  /// The color palette for the sprite (DMG).
+  DmgPalette = 1 << 4,
+  /// Whether the sprite should be flipped vertically.
+  XFlip = 1 << 5,
+  /// Whether the sprite should be flipped horizontally.
+  YFlip = 1 << 6,
+  /// The priority of this sprite. 0 indicates lower priority over the
+  /// background and window colors.
+  Priority = 1 << 7,
+}
+
+/// The LCD control byte.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[repr(u8)]
+enum LcdControl {
+  /// Whether the background should be displayed.
+  BackgroundDisplay = 1 << 0,
+  /// Whether the sprites should be displayed.
+  SpriteDisplay = 1 << 1,
+  /// The dimensions of the sprite. 0 indicates 8x8 and 1 indicates 8x16.
+  SpriteDimensions = 1 << 2,
+  /// The background tile map. 0 indicates address space [0x9800, 0x9C00) and 1 indicates
+  /// [0x9C00, 0xA000).
+  BackgroundTileMap = 1 << 3,
+  /// The background tile data. 0 indicates address space [0x8800, 0x9800) and 1 indicates
+  /// [0x8000, 0x9000).
+  BackgroundTileData = 1 << 4,
+  /// Whether the window should be displayed.
+  WindowDisplay = 1 << 5,
+  /// The window tile map map. 0 indicates address space [0x9800, 0x9C00) and 1 indicates
+  /// [0x9C00, 0xA000).
+  WindowTileMap = 1 << 6,
+  /// Whether the LCD should be on.
+  LcdDisplay = 1 << 7,
 }
 
 /// The state of a direct memory transfer.
@@ -109,7 +152,7 @@ impl Ppu {
       // Pixel transfer lasts for 172 cycles
       PpuMode::PixelTransfer => {
         if self.counter >= PIXEL_TRANSFER_CYCLE_COUNT {
-          self.counter -= OAM_CYCLE_COUNT;
+          self.counter -= PIXEL_TRANSFER_CYCLE_COUNT;
           self.mode = PpuMode::HBlank;
           self.render_scanline();
         }
@@ -229,134 +272,223 @@ impl Ppu {
     self.oam[(address - 0xFE00) as usize] = value;
   }
 
-  /// Renders a scanline
+  /// Fetches a pixel from the given tile index, row (0-7 inclusive),
+  /// and X-coordinate (0-7 inclusive).
+  fn get_tile_pixel(&self, tile_index: u8, row: u8, x: u8) -> u8 {
+    let (base_addr, tile_index) = if is_flag_set!(self.lcdc, LcdControl::BackgroundTileData as u8) {
+      (0x8000, tile_index)
+    } else {
+      // Tile indices in this region are signed, so we need to offset them accordingly
+      //
+      // Tile indices [0, 128) reference sprites starting from 0x9000 and
+      // tile indices [128, 255) reference sprites starting from 0x8800
+      //
+      // See https://gbdev.io/pandocs/Tile_Data.html#vram-tile-data for more info.
+      if tile_index < 128 {
+        (0x9000, tile_index)
+      } else {
+        (0x8800, (tile_index - 128))
+      }
+    };
+
+    // Tiles are stored in 16 bytes
+    let tile_offset = tile_index as u16 * 16;
+    let row_offset = row as u16 * 2;
+    let lower = self.read_ram(base_addr + tile_offset + row_offset);
+    let upper = self.read_ram(base_addr + tile_offset + row_offset + 1);
+    let bit = 7 - (x % 8);
+
+    ((upper >> bit) & 1) << 1 | ((lower >> bit) & 1)
+  }
+
+  /// Fetches a sprite's pixel from the given tile index, row (0, 7 inclusive),
+  /// and X-coordinate (0-7 inclusive).
+  fn get_sprite_pixel(&self, tile_index: u8, row: u8, x: u8, flip_x: bool) -> u8 {
+    // Sprites are stored in 16 bytes
+    let tile_offset = tile_index as u16 * 16;
+    let row_offset = row as u16 * 2;
+    let lower = self.read_ram(0x8000 + tile_offset + row_offset);
+    let upper = self.read_ram(0x8000 + tile_offset + row_offset + 1);
+    let bit = if flip_x { x } else { 7 - x };
+
+    (((upper >> bit) & 1) << 1) | ((lower >> bit) & 1)
+  }
+
+  /// Renders a complete scanline into the frame buffer.
   fn render_scanline(&mut self) {
-    // The MSB of `lcdc` determines whether there should be any output to the window.
-    if self.lcdc & 0x80 == 0 {
+    // Only render if the LCD is enabled.
+    if !is_flag_set!(self.lcdc, LcdControl::LcdDisplay as u8) {
       return;
     }
 
     let mut scanline = [0; 160];
 
-    // The LSB determines whether the background should be drawn
-    if self.lcdc & 0x01 == 1 {
+    // Render background if enabled
+    if is_flag_set!(self.lcdc, LcdControl::BackgroundDisplay as u8) {
       self.render_background(&mut scanline);
     }
 
-    // The 5th bit determines whether the window should be drawn
-    if self.lcdc & 0x20 == 1 {
+    // Render window if enabled
+    if is_flag_set!(self.lcdc, LcdControl::WindowDisplay as u8) {
       self.render_window(&mut scanline);
     }
 
-    // The 2nd bit determines whether the sprites should be drawn
-    if self.lcdc & 0x02 == 1 {
+    // Render sprites if enabled
+    if is_flag_set!(self.lcdc, LcdControl::SpriteDisplay as u8) {
       self.render_sprites(&mut scanline);
     }
 
     self.buffer[self.ly as usize] = scanline;
   }
 
+  /// Renders the background into the provided scanline.
   fn render_background(&self, scanline: &mut [u8; 160]) {
-    let base_tilemap = if self.lcdc & 0x08 == 0 {
-      0x9800
-    } else {
+    let bg_tile_map = if is_flag_set!(self.lcdc, LcdControl::BackgroundTileMap as u8) {
       0x9C00
+    } else {
+      0x9800
     };
 
-    let y = self.ly.wrapping_add(self.scy) as usize;
+    let y = (self.ly as u16).wrapping_add(self.scy as u16);
+    // Background tile map have 32 tiles per row
     let tile_row = (y / 8) * 32;
 
-    for x in 0_u8..160 {
-      let x_pos = x.wrapping_add(self.scx) as usize;
+    for (x, pixel) in scanline.iter_mut().enumerate() {
+      let x_pos = (x as u16).wrapping_add(self.scx as u16);
       let tile_col = x_pos / 8;
-      let tile_index = self.memory[base_tilemap - 0x8000 + tile_row + tile_col] as usize;
+      let tile_index = self.read_ram(bg_tile_map + tile_row + tile_col);
 
-      let tile_addr = 0x8000 + (tile_index * 16);
-      let row_offset = (y % 8) * 2;
-
-      let low = self.memory[tile_addr - 0x8000 + row_offset];
-      let high = self.memory[tile_addr - 0x8000 + row_offset + 1];
-
-      let bit = 7 - (x_pos % 8);
-      let color = ((high >> bit) & 1) << 1 | ((low >> bit) & 1);
-
-      scanline[x as usize] = color;
+      *pixel = self.get_tile_pixel(tile_index, (y % 8) as u8, (x_pos % 8) as u8);
     }
   }
 
+  /// Renders the window into the scanline.
   fn render_window(&self, scanline: &mut [u8; 160]) {
-    // Don't draw if its out of the bounds of the current scanline
+    // The window is only drawn on scanlines at or below the window Y-position
     if self.ly < self.wy {
       return;
     }
 
-    let base_tilemap = if self.lcdc & 0x40 == 0 {
-      0x9800
-    } else {
+    let window_tile_map = if is_flag_set!(self.lcdc, LcdControl::WindowTileMap as u8) {
       0x9C00
+    } else {
+      0x9800
     };
 
-    // The window is drawn starting from `WX - 7`
+    // Offset by -7 because thats where the window starts
     let window_x_start = self.wx.saturating_sub(7);
-    let window_y = self.window_line;
-    // Tiles are arranged in rows of 32 for the window.
-    let tile_row_offset = (window_y as usize / 8) * 32;
+    let window_y = self.window_line as u16;
+    // Window tile map have 32 tiles per row
+    let tile_row = (window_y / 8) * 32;
 
+    // Render window pixels starting at window_x_start.
     for screen_x in window_x_start..160 {
-      let window_x = screen_x - window_x_start;
-      let tile_col = (window_x as usize) / 8;
-      let tilemap_index = (base_tilemap - 0x8000) + tile_row_offset + tile_col;
-      let tile_index = self.memory[tilemap_index] as usize;
+      let window_x = (screen_x - window_x_start) as u16;
+      let tile_col = window_x / 8;
+      let tile_index = self.read_ram(window_tile_map + tile_row + tile_col);
 
-      // Each tile takes 16 bytes (8x8 pixels, 2 bytes per row)
-      let tile_addr = 0x8000 + (tile_index * 16);
-
-      let row_offset = (window_y as usize % 8) * 2;
-
-      let low = self.memory[tile_addr - 0x8000 + row_offset];
-      let high = self.memory[tile_addr - 0x8000 + row_offset + 1];
-
-      let bit = 7 - (window_x % 8);
-      let color = ((high >> bit) & 1) << 1 | ((low >> bit) & 1);
-
-      scanline[screen_x as usize] = color;
+      scanline[screen_x as usize] =
+        self.get_tile_pixel(tile_index, (window_y % 8) as u8, (window_x % 8) as u8);
     }
   }
 
+  /// Renders sprites into the scanline.
   fn render_sprites(&self, scanline: &mut [u8; 160]) {
-    // TODO: Handle sprite attributes
-    // TODO: We're supposed to only handle 10 sprite objects. Invisible objects due to an
-    // x-coordinate being off-screen still counts! Only out of bound y-coordinate sprite
-    // objects don't count.
-    for i in 0..40 {
-      let sprite_index = i * 4;
-      let y = self.oam[sprite_index] as i16 - 16;
-      let x = self.oam[sprite_index + 1] as i16 - 8;
-      let tile_index = self.oam[sprite_index + 2] as usize;
+    // The Gameboy can only draw 10 visible sprites per scanline
+    let mut sprites_drawn = 0;
+    // Bit 2 determines the sprite's height
+    let sprite_height = if is_flag_set!(self.lcdc, LcdControl::SpriteDimensions as u8) {
+      16
+    } else {
+      8
+    };
 
-      if self.ly < y as u8 || self.ly >= y as u8 + 8 {
+    for chunk in self.oam.chunks_exact(4) {
+      if sprites_drawn >= 10 {
+        break;
+      }
+
+      // NOTE: We have to do this because `array_chunks` isn't stable. It's a bit ugly,
+      // but its looks better than iterating over the indices and offset into the OAM
+      let (raw_y, raw_x, tile_index, attributes) = match chunk {
+        &[a, b, c, d] => (a, b, c, d),
+        _ => unreachable!(),
+      };
+
+      // A Y-coordinate of 16 means the sprite is fully visible, so offset it by -16
+      let sprite_y = raw_y as i16 - 16;
+
+      // Ignore invisible sprites (those not within the bounds of the screen or not on
+      // the current scanline) and don't count it towards the sprite limit.
+      if raw_y == 0
+        || raw_y >= 160
+        || (self.ly as i16) < sprite_y
+        || (self.ly as i16) >= sprite_y + sprite_height
+      {
         continue;
       }
 
-      let tile_addr = 0x8000 + (tile_index * 16);
-      let row_offset = ((self.ly - y as u8) * 2) as usize;
-      let low = self.memory[tile_addr - 0x8000 + row_offset];
-      let high = self.memory[tile_addr - 0x8000 + row_offset + 1];
+      sprites_drawn += 1;
 
+      // A X-coordinate of 8 means the sprite is fully visible, so offset it by -8
+      let sprite_x = raw_x as i16 - 8;
+
+      // Get the row where the sprite should be drawn
+      let row = {
+        let line = self.ly as i16 - sprite_y;
+
+        if is_flag_set!(attributes, SpriteAttributes::YFlip as u8) {
+          (sprite_height - 1 - line) as u8
+        } else {
+          line as u8
+        }
+      };
+
+      let (tile_to_use, tile_row) = if sprite_height == 16 {
+        // For 8×16 sprites, we need to clear the LSB of the top tile
+        // and set it for the bottom tile
+        let cleared_tile = tile_index & 0xFE;
+
+        if row < 8 {
+          (cleared_tile, row)
+        } else {
+          (cleared_tile | 0x01, row - 8)
+        }
+      } else {
+        (tile_index, row)
+      };
+
+      // Render the 8 pixels in each tile
       for x_offset in 0..8 {
-        let bit = 7 - x_offset;
-        let color = ((high >> bit) & 1) << 1 | ((low >> bit) & 1);
+        let screen_x = sprite_x + x_offset as i16;
+
+        // Don't draw sprites that are off the screen
+        if screen_x < 0 || screen_x >= 160 {
+          continue;
+        }
+
+        let pixel = &mut scanline[screen_x as usize];
+
+        // Don't draw over the background if the sprite has lower priority.
+        if is_flag_set!(attributes, SpriteAttributes::Priority as u8) && *pixel != 0 {
+          continue;
+        }
+
+        let flip_x = is_flag_set!(attributes, SpriteAttributes::XFlip as u8);
+        let color = self.get_sprite_pixel(tile_to_use, tile_row, x_offset, flip_x);
 
         if color == 0 {
           continue;
         }
 
-        let screen_x = x + x_offset as i16;
-        if screen_x < 0 || screen_x >= 160 {
-          continue;
-        }
+        let palette = if is_flag_set!(attributes, SpriteAttributes::DmgPalette as u8) {
+          self.obp1
+        } else {
+          self.obp0
+        };
 
-        scanline[screen_x as usize] = color;
+        // Map the raw sprite color using the selected palette.
+        *pixel = (palette >> (color << 1)) & 0x03;
       }
     }
   }
