@@ -166,8 +166,8 @@ impl Hardware {
 
   fn read_io_register(&self, address: u16) -> u8 {
     match address {
-      JOYPAD_REGISTER => self.joypad.read(),
-      TIMER_REGISTER_START..TIMER_REGISTER_END => self.timer.read(address),
+      JOYPAD_REGISTER => self.joypad.read_register(),
+      TIMER_REGISTER_START..TIMER_REGISTER_END => self.timer.read_register(address),
       PPU_REGISTER_START..PPU_REGISTER_END => self.ppu.read_register(address),
       INTERRUPT_FLAG => self.interrupts.requested_bitfield(),
       _ => todo!("Other registers"),
@@ -176,8 +176,8 @@ impl Hardware {
 
   fn write_io_register(&mut self, address: u16, value: u8) {
     match address {
-      JOYPAD_REGISTER => self.joypad.write(value),
-      TIMER_REGISTER_START..TIMER_REGISTER_END => self.timer.write(address, value),
+      JOYPAD_REGISTER => self.joypad.write_register(value),
+      TIMER_REGISTER_START..TIMER_REGISTER_END => self.timer.write_register(address, value),
       PPU_REGISTER_START..PPU_REGISTER_END => self.ppu.write_register(address, value),
       INTERRUPT_FLAG => self.interrupts.set_requested(value),
       _ => todo!("Other registers"),
