@@ -1,4 +1,7 @@
-use crate::interrupts::{Interrupt, Interrupts};
+use crate::{
+  flags::{add_flag, remove_flag},
+  interrupts::{Interrupt, Interrupts},
+};
 
 /// The input controller used to interact with the game.
 #[derive(Debug, Clone)]
@@ -62,9 +65,9 @@ impl Joypad {
 
     // A button is pressed if its bit is set to 0
     if pressed {
-      self.pressed &= !mask;
+      self.pressed = remove_flag!(self.pressed, button as u8);
     } else {
-      self.pressed |= mask;
+      self.pressed = add_flag!(self.pressed, button as u8);
     }
 
     if self.pressed != before {

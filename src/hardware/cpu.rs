@@ -1,7 +1,7 @@
 use crate::{
-  flags::{ConditionalFlag, Flag},
-  hardware::registers::{Register, RegisterPair, Registers},
+  flags::{ConditionalFlag, Flag, add_flag, is_flag_set, remove_flag},
   hardware::Hardware,
+  hardware::registers::{Register, RegisterPair, Registers},
   instructions::{Instruction, Operand},
 };
 
@@ -205,7 +205,7 @@ impl Cpu {
       }
 
       ADC(Operand::Register(Register::A), Operand::Register(src)) => {
-        let is_carry_set = self.is_flag_set(Flag::C);
+        let is_carry_set = is_flag_set!(self.flags, Flag::C as u8);
         let reg_value = self.read_register(hardware, *src);
         let res = self
           .registers
@@ -234,7 +234,7 @@ impl Cpu {
         }
       }
       ADC(Operand::Register(Register::A), Operand::Byte(byte)) => {
-        let is_carry_set = self.is_flag_set(Flag::C);
+        let is_carry_set = is_flag_set!(self.flags, Flag::C as u8);
         let res = self
           .registers
           .a
@@ -458,7 +458,7 @@ impl Cpu {
         self.clock.advance(2);
       }
       SBC(Operand::Register(Register::A), Operand::Register(reg)) => {
-        let is_carry_set = self.is_flag_set(Flag::C) as u8;
+        let is_carry_set = is_flag_set!(self.flags, Flag::C as u8) as u8;
         let reg_value = self.read_register(hardware, *reg);
         let a_value = self.registers.a;
         let res = a_value.wrapping_sub(reg_value).wrapping_sub(is_carry_set);
@@ -484,7 +484,7 @@ impl Cpu {
         }
       }
       SBC(Operand::Register(Register::A), Operand::Byte(value)) => {
-        let is_carry_set = self.is_flag_set(Flag::C) as u8;
+        let is_carry_set = is_flag_set!(self.flags, Flag::C as u8) as u8;
         let a_value = self.registers.a;
         let res = a_value.wrapping_sub(*value).wrapping_sub(is_carry_set);
 
@@ -565,9 +565,9 @@ impl Cpu {
       DAA => {
         let mut correction = 0;
 
-        let subtracted = self.is_flag_set(Flag::N);
-        let half_carried = self.is_flag_set(Flag::H);
-        let mut carried = self.is_flag_set(Flag::C);
+        let subtracted = is_flag_set!(self.flags, Flag::N as u8);
+        let half_carried = is_flag_set!(self.flags, Flag::H as u8);
+        let mut carried = is_flag_set!(self.flags, Flag::C as u8);
 
         // Check the lower nibble
         if half_carried || (!subtracted && (self.registers.a & 0x0F) > 0x09) {
@@ -738,7 +738,7 @@ impl Cpu {
       CCF => {
         self.toggle_flag(Flag::N, false);
         self.toggle_flag(Flag::H, false);
-        self.toggle_flag(Flag::C, !self.is_flag_set(Flag::C));
+        self.toggle_flag(Flag::C, !is_flag_set!(self.flags, Flag::C as u8));
 
         self.clock.tick();
       }
@@ -767,7 +767,7 @@ impl Cpu {
       }
 
       RLA => {
-        let is_carry_set = self.is_flag_set(Flag::C);
+        let is_carry_set = is_flag_set!(self.flags, Flag::C as u8);
         let a_value = self.registers.a;
         let res = (a_value << 1) | (is_carry_set as u8);
 
@@ -794,7 +794,7 @@ impl Cpu {
         self.clock.tick();
       }
       RRA => {
-        let is_carry_set = self.is_flag_set(Flag::C);
+        let is_carry_set = is_flag_set!(self.flags, Flag::C as u8);
         let a_value = self.registers.a;
         let res = (a_value >> 1) | ((is_carry_set as u8) << 7);
 
@@ -861,7 +861,7 @@ impl Cpu {
       }
       RL(Operand::Register(reg)) => {
         let reg_value = self.read_register(hardware, *reg);
-        let is_carry_set = self.is_flag_set(Flag::C) as u8;
+        let is_carry_set = is_flag_set!(self.flags, Flag::C as u8) as u8;
         let res = (reg_value << 1) | is_carry_set;
 
         self.write_register(hardware, *reg, res);
@@ -898,7 +898,7 @@ impl Cpu {
       }
       RR(Operand::Register(reg)) => {
         let reg_value = self.read_register(hardware, *reg);
-        let is_carry_set = self.is_flag_set(Flag::C) as u8;
+        let is_carry_set = is_flag_set!(self.flags, Flag::C as u8) as u8;
         let res = (reg_value >> 1) | (is_carry_set << 7);
 
         self.write_register(hardware, *reg, res);
@@ -1537,30 +1537,20 @@ impl Cpu {
   /// Returns whether the following [`ConditionalFlag`] is set.
   fn is_conditional_flag_set(&self, cond_flag: ConditionalFlag) -> bool {
     match cond_flag {
-      ConditionalFlag::Z => self.is_flag_set(Flag::Z),
-      ConditionalFlag::C => self.is_flag_set(Flag::C),
-      ConditionalFlag::NZ => !self.is_flag_set(Flag::Z),
-      ConditionalFlag::NC => !self.is_flag_set(Flag::C),
+      ConditionalFlag::Z => is_flag_set!(self.flags, Flag::Z as u8),
+      ConditionalFlag::C => is_flag_set!(self.flags, Flag::C as u8),
+      ConditionalFlag::NZ => !is_flag_set!(self.flags, Flag::Z as u8),
+      ConditionalFlag::NC => !is_flag_set!(self.flags, Flag::C as u8),
     }
-  }
-
-  /// Returns whether or not the [`Flags`] is set.
-  fn is_flag_set(&self, flags: Flag) -> bool {
-    (self.flags & flags as u8) == flags as u8
   }
 
   /// Conditionally toggles the flag.
-  fn toggle_flag(&mut self, flags: Flag, condition: bool) {
+  fn toggle_flag(&mut self, flag: Flag, condition: bool) {
     if condition {
-      self.flags |= flags as u8;
+      self.flags = add_flag!(self.flags, flag as u8);
     } else {
-      self.flags &= !(flags as u8);
+      self.flags = remove_flag!(self.flags, flag as u8);
     }
-  }
-
-  /// Sets the following [`Flags`].
-  fn set_flag(&mut self, flags: Flag) {
-    self.flags |= flags as u8;
   }
 }
 
