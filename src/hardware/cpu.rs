@@ -143,10 +143,10 @@ impl Cpu {
 
         hardware.write_byte(address, self.registers.a);
 
-        let inc = address.wrapping_add(1);
+        let res = address.wrapping_add(1);
 
-        self.registers.h = ((inc >> 8) & 0xFF) as u8;
-        self.registers.l = (inc & 0xFF) as u8;
+        self.registers.h = ((res >> 8) & 0xFF) as u8;
+        self.registers.l = (res & 0xFF) as u8;
 
         self.clock.advance(2);
       }
@@ -156,10 +156,10 @@ impl Cpu {
 
         self.registers.a = value;
 
-        let inc = address.wrapping_add(1);
+        let res = address.wrapping_add(1);
 
-        self.registers.h = ((inc >> 8) & 0xFF) as u8;
-        self.registers.l = (inc & 0xFF) as u8;
+        self.registers.h = ((res >> 8) & 0xFF) as u8;
+        self.registers.l = (res & 0xFF) as u8;
 
         self.clock.advance(2);
       }
@@ -168,10 +168,10 @@ impl Cpu {
 
         hardware.write_byte(address, self.registers.a);
 
-        let inc = address.wrapping_sub(1);
+        let res = address.wrapping_sub(1);
 
-        self.registers.h = ((inc >> 8) & 0xFF) as u8;
-        self.registers.l = (inc & 0xFF) as u8;
+        self.registers.h = ((res >> 8) & 0xFF) as u8;
+        self.registers.l = (res & 0xFF) as u8;
 
         self.clock.advance(2);
       }
@@ -181,10 +181,10 @@ impl Cpu {
 
         self.registers.a = value;
 
-        let inc = address.wrapping_sub(1);
+        let res = address.wrapping_sub(1);
 
-        self.registers.h = ((inc >> 8) & 0xFF) as u8;
-        self.registers.l = (inc & 0xFF) as u8;
+        self.registers.h = ((res >> 8) & 0xFF) as u8;
+        self.registers.l = (res & 0xFF) as u8;
 
         self.clock.advance(2);
       }
@@ -220,11 +220,11 @@ impl Cpu {
         self.toggle_flag(Flag::N, false);
         self.toggle_flag(
           Flag::H,
-          (self.registers.a & 0x0F) + (reg_value & 0x0F) + (is_carry_set as u8 & 0x0F) > 0x0F,
+          (res & 0x0F) + (reg_value & 0x0F) + (is_carry_set as u8 & 0x0F) > 0x0F,
         );
         self.toggle_flag(
           Flag::C,
-          (self.registers.a as u16 + reg_value as u16 + is_carry_set as u16) > u8::MAX as u16,
+          (res as u16 + reg_value as u16 + is_carry_set as u16) > u8::MAX as u16,
         );
 
         self.clock.tick();
@@ -248,11 +248,11 @@ impl Cpu {
         self.toggle_flag(Flag::N, false);
         self.toggle_flag(
           Flag::H,
-          (self.registers.a & 0x0F) + (*byte & 0x0F) + (is_carry_set as u8 & 0x0F) > 0x0F,
+          (res & 0x0F) + (*byte & 0x0F) + (is_carry_set as u8 & 0x0F) > 0x0F,
         );
         self.toggle_flag(
           Flag::C,
-          (self.registers.a as u16 + *byte as u16 + is_carry_set as u16) > u8::MAX as u16,
+          (res as u16 + *byte as u16 + is_carry_set as u16) > u8::MAX as u16,
         );
 
         self.clock.advance(2);
@@ -265,14 +265,8 @@ impl Cpu {
 
         self.toggle_flag(Flag::Z, res == 0);
         self.toggle_flag(Flag::N, false);
-        self.toggle_flag(
-          Flag::H,
-          (self.registers.a & 0x0F) + (reg_value & 0x0F) > 0x0F,
-        );
-        self.toggle_flag(
-          Flag::C,
-          (self.registers.a as u16 + reg_value as u16) > u8::MAX as u16,
-        );
+        self.toggle_flag(Flag::H, (res & 0x0F) + (reg_value & 0x0F) > 0x0F);
+        self.toggle_flag(Flag::C, (res as u16 + reg_value as u16) > u8::MAX as u16);
 
         self.clock.tick();
 
@@ -288,11 +282,8 @@ impl Cpu {
 
         self.toggle_flag(Flag::Z, res == 0);
         self.toggle_flag(Flag::N, false);
-        self.toggle_flag(Flag::H, (self.registers.a & 0x0F) + (*byte & 0x0F) > 0x0F);
-        self.toggle_flag(
-          Flag::C,
-          (self.registers.a as u16 + *byte as u16) > u8::MAX as u16,
-        );
+        self.toggle_flag(Flag::H, (res & 0x0F) + (*byte & 0x0F) > 0x0F);
+        self.toggle_flag(Flag::C, (res as u16 + *byte as u16) > u8::MAX as u16);
 
         self.clock.advance(2);
       }
@@ -648,7 +639,7 @@ impl Cpu {
         let should_jump = self.is_conditional_flag_set(*flag);
 
         if should_jump {
-          // NOTE: The byte can be negative, so sign-extend add the value
+          // The byte can be negative, so sign-extend add the value
           self.registers.pc = self.registers.pc.wrapping_add(*offset as i8 as u16);
           self.clock.advance(3);
         } else {
