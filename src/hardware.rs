@@ -7,6 +7,7 @@ pub mod timer;
 
 pub use cpu::Cpu;
 pub use joypad::Joypad;
+use ppu::PpuMode;
 pub use timer::Timer;
 
 use crate::{
@@ -59,7 +60,14 @@ impl Hardware {
       // ROM, bank N
       ROM_BANK_N_START..ROM_BANK_N_END => self.cartridge.read_rom(address),
       // Video RAM
-      VIDEO_RAM_START..VIDEO_RAM_END => self.ppu.read_ram(address),
+      VIDEO_RAM_START..VIDEO_RAM_END => {
+        // VRAM is inaccessible during pixel transfer mode
+        if matches!(self.ppu.current_mode(), PpuMode::PixelTransfer) {
+          0xFF
+        } else {
+          self.ppu.read_ram(address)
+        }
+      }
       // External RAM
       EXTERNAL_RAM_START..EXTERNAL_RAM_END => self.cartridge.read_ram(address),
       // Work RAM
@@ -70,8 +78,18 @@ impl Hardware {
       ECHO_RAM_START..ECHO_RAM_END => {
         self.memory[(WORK_RAM_OFFSET + (address - ECHO_RAM_START)) as usize]
       }
-      // Sprite memory
-      OAM_START..OAM_END => self.ppu.read_oam(address),
+      // OAM
+      OAM_START..OAM_END => {
+        // OAM is inaccessible during OAM and pixel transfer modes
+        if matches!(
+          self.ppu.current_mode(),
+          PpuMode::OamScan | PpuMode::PixelTransfer
+        ) {
+          0xFF
+        } else {
+          self.ppu.read_oam(address)
+        }
+      }
       // Unused
       UNUSED_START..UNUSED_END => 0xFF,
       // I/O Registers
@@ -99,7 +117,12 @@ impl Hardware {
       // Switchable ROM bank
       ROM_BANK_N_START..ROM_BANK_N_END => self.cartridge.write_rom(address, value),
       // Video RAM
-      VIDEO_RAM_START..VIDEO_RAM_END => self.ppu.write_ram(address, value),
+      VIDEO_RAM_START..VIDEO_RAM_END => {
+        // Writing to VRAM is undefined when in pixel transfer mode
+        if !matches!(self.ppu.current_mode(), PpuMode::PixelTransfer) {
+          self.ppu.write_ram(address, value)
+        }
+      }
       // External RAM
       EXTERNAL_RAM_START..EXTERNAL_RAM_END => self.cartridge.write_ram(address, value),
       // Work RAM
@@ -110,8 +133,16 @@ impl Hardware {
       ECHO_RAM_START..ECHO_RAM_END => {
         self.memory[(WORK_RAM_OFFSET + (address - ECHO_RAM_START)) as usize] = value
       }
-      // Sprite memory
-      OAM_START..OAM_END => self.ppu.write_oam(address, value),
+      // OAM
+      OAM_START..OAM_END => {
+        // Writing to OAM is undefined when in OAM and pixel transfer mode
+        if !matches!(
+          self.ppu.current_mode(),
+          PpuMode::OamScan | PpuMode::PixelTransfer
+        ) {
+          self.ppu.write_oam(address, value)
+        }
+      }
       // Unused
       UNUSED_START..UNUSED_END => {}
       // I/O Registers
@@ -140,9 +171,11 @@ impl Hardware {
         let iterations = (cycles as u16 / 4).min(remaining_bytes);
 
         for _ in 0..iterations {
-          let src = self.read_byte(starting_address + index);
+          let src_byte = self.read_byte(starting_address + index);
 
-          self.write_byte(0xFE00 + index, src);
+          // Use PPU's write_oam method because Hardware's write_byte fn checks for
+          // active DMA transfers.
+          self.ppu.write_oam(0xFE00 + index, src_byte);
 
           index += 1;
         }

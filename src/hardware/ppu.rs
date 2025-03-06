@@ -79,12 +79,12 @@ impl Ppu {
   pub fn step(&mut self, interrupts: &mut Interrupts, cycles: usize) {
     self.counter += cycles;
 
-    match self.ppu_mode() {
+    match self.current_mode() {
       // OAM scan lasts for 80 cycles
       PpuMode::OamScan => {
         if self.counter >= OAM_CYCLE_COUNT {
           self.counter -= OAM_CYCLE_COUNT;
-          self.set_ppu_mode(PpuMode::PixelTransfer);
+          self.set_current_mode(PpuMode::PixelTransfer);
 
           if is_flag_set!(self.stat, StatFlag::OamInterrupt as u8) {
             interrupts.request_interrupt(Interrupt::Lcd)
@@ -95,7 +95,7 @@ impl Ppu {
       PpuMode::PixelTransfer => {
         if self.counter >= PIXEL_TRANSFER_CYCLE_COUNT {
           self.counter -= PIXEL_TRANSFER_CYCLE_COUNT;
-          self.set_ppu_mode(PpuMode::HBlank);
+          self.set_current_mode(PpuMode::HBlank);
           self.render_scanline();
 
           if is_flag_set!(self.stat, StatFlag::HBlankInterrupt as u8) {
@@ -120,13 +120,13 @@ impl Ppu {
           }
 
           if self.ly == 144 {
-            self.set_ppu_mode(PpuMode::VBlank);
+            self.set_current_mode(PpuMode::VBlank);
 
             if is_flag_set!(self.stat, StatFlag::VBlankInterrupt as u8) {
               interrupts.request_interrupt(Interrupt::VBlank);
             }
           } else {
-            self.set_ppu_mode(PpuMode::OamScan);
+            self.set_current_mode(PpuMode::OamScan);
           }
         }
       }
@@ -148,7 +148,7 @@ impl Ppu {
 
           if self.ly > 153 {
             self.ly = 0;
-            self.set_ppu_mode(PpuMode::OamScan);
+            self.set_current_mode(PpuMode::OamScan);
           }
         }
       }
@@ -186,7 +186,7 @@ impl Ppu {
     match address {
       0xFF40 => self.lcdc = value,
       // Preserve the PPU mode in the lower 2 bits
-      0xFF41 => self.stat = (value & 0b0111_1100) | self.ppu_mode() as u8,
+      0xFF41 => self.stat = (value & 0b0111_1100) | self.current_mode() as u8,
       0xFF42 => self.scy = value,
       0xFF43 => self.scx = value,
       // Writing to LY resets it
@@ -225,13 +225,13 @@ impl Ppu {
     self.oam[(address - 0xFE00) as usize] = value;
   }
 
-  /// Returns the mode that the PPU is in.
-  pub fn ppu_mode(&self) -> PpuMode {
+  /// Returns the current mode that the PPU is in.
+  pub fn current_mode(&self) -> PpuMode {
     PpuMode::try_from(self.stat & 0x03).unwrap()
   }
 
   /// Sets the mode of the PPU.
-  fn set_ppu_mode(&mut self, mode: PpuMode) {
+  fn set_current_mode(&mut self, mode: PpuMode) {
     // The 7th bit is unused the the lower 2 bits store the mode
     self.stat = (self.stat & 0b0111_1100) | mode as u8;
   }
