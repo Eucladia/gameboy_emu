@@ -108,7 +108,10 @@ impl Cpu {
       }
       &LD(Operand::MemoryAddress(value), Operand::RegisterPair(RegisterPair::SP)) => {
         hardware.write_byte(value, (self.registers.sp & 0xFF) as u8);
-        hardware.write_byte(value + 1, ((self.registers.sp >> 8) & 0xFF) as u8);
+        hardware.write_byte(
+          value.wrapping_add(1),
+          ((self.registers.sp >> 8) & 0xFF) as u8,
+        );
         self.clock.advance(5);
       }
       &LD(Operand::Register(dest), Operand::Byte(value)) => {
