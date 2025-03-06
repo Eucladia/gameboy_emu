@@ -84,9 +84,9 @@ impl Cpu {
     use Instruction::*;
 
     match instruction {
-      LD(Operand::Register(dest), Operand::Register(src)) => {
-        let value = self.read_register(hardware, *src);
-        self.write_register(hardware, *dest, value);
+      &LD(Operand::Register(dest), Operand::Register(src)) => {
+        let value = self.read_register(hardware, src);
+        self.write_register(hardware, dest, value);
         self.clock.tick();
 
         // Add another machine cycle if we fetched or wrote to memory
@@ -94,25 +94,25 @@ impl Cpu {
           self.clock.tick();
         }
       }
-      LD(Operand::RegisterPair(rp), Operand::Word(value)) => {
-        self.write_register_pair(*rp, *value);
+      &LD(Operand::RegisterPair(rp), Operand::Word(value)) => {
+        self.write_register_pair(rp, value);
         self.clock.advance(3);
       }
-      LD(Operand::RegisterPairMemory(rp), Operand::Register(Register::A)) => {
-        hardware.write_byte(self.read_register_pair(*rp), self.registers.a);
+      &LD(Operand::RegisterPairMemory(rp), Operand::Register(Register::A)) => {
+        hardware.write_byte(self.read_register_pair(rp), self.registers.a);
         self.clock.advance(2);
       }
-      LD(Operand::Register(Register::A), Operand::RegisterPairMemory(rp)) => {
-        self.registers.a = hardware.read_byte(self.read_register_pair(*rp));
+      &LD(Operand::Register(Register::A), Operand::RegisterPairMemory(rp)) => {
+        self.registers.a = hardware.read_byte(self.read_register_pair(rp));
         self.clock.advance(2);
       }
-      LD(Operand::MemoryAddress(value), Operand::RegisterPair(RegisterPair::SP)) => {
-        hardware.write_byte(*value, (self.registers.sp & 0xFF) as u8);
-        hardware.write_byte(*value + 1, ((self.registers.sp >> 8) & 0xFF) as u8);
+      &LD(Operand::MemoryAddress(value), Operand::RegisterPair(RegisterPair::SP)) => {
+        hardware.write_byte(value, (self.registers.sp & 0xFF) as u8);
+        hardware.write_byte(value + 1, ((self.registers.sp >> 8) & 0xFF) as u8);
         self.clock.advance(5);
       }
-      LD(Operand::Register(dest), Operand::Byte(value)) => {
-        self.write_register(hardware, *dest, *value);
+      &LD(Operand::Register(dest), Operand::Byte(value)) => {
+        self.write_register(hardware, dest, value);
         self.clock.advance(2);
 
         // Add another machine cycle if we wrote to memory
@@ -120,21 +120,21 @@ impl Cpu {
           self.clock.tick();
         }
       }
-      LD(Operand::RegisterPair(RegisterPair::HL), Operand::StackOffset(offset)) => {
+      &LD(Operand::RegisterPair(RegisterPair::HL), Operand::StackOffset(offset)) => {
         // NOTE: The offset can be negative, so do a sign-extend add.
-        self.registers.sp = self.registers.sp.wrapping_add(*offset as i8 as u16);
+        self.registers.sp = self.registers.sp.wrapping_add(offset as i8 as u16);
         self.clock.advance(3);
       }
       LD(Operand::RegisterPair(RegisterPair::SP), Operand::RegisterPair(RegisterPair::HL)) => {
         self.registers.sp = ((self.registers.h as u16) << 8) | self.registers.l as u16;
         self.clock.advance(2);
       }
-      LD(Operand::MemoryAddress(address), Operand::Register(Register::A)) => {
-        hardware.write_byte(*address, self.registers.a);
+      &LD(Operand::MemoryAddress(address), Operand::Register(Register::A)) => {
+        hardware.write_byte(address, self.registers.a);
         self.clock.advance(4);
       }
-      LD(Operand::Register(Register::A), Operand::MemoryAddress(address)) => {
-        self.registers.a = hardware.read_byte(*address);
+      &LD(Operand::Register(Register::A), Operand::MemoryAddress(address)) => {
+        self.registers.a = hardware.read_byte(address);
         self.clock.advance(4);
       }
 
@@ -188,12 +188,12 @@ impl Cpu {
 
         self.clock.advance(2);
       }
-      LDH(Operand::HighMemoryByte(value), Operand::Register(Register::A)) => {
-        hardware.write_byte(0xFF00 + *value as u16, self.registers.a);
+      &LDH(Operand::HighMemoryByte(value), Operand::Register(Register::A)) => {
+        hardware.write_byte(0xFF00 + value as u16, self.registers.a);
         self.clock.advance(3);
       }
-      LDH(Operand::Register(Register::A), Operand::HighMemoryByte(value)) => {
-        self.registers.a = hardware.read_byte(0xFF00 + *value as u16);
+      &LDH(Operand::Register(Register::A), Operand::HighMemoryByte(value)) => {
+        self.registers.a = hardware.read_byte(0xFF00 + value as u16);
         self.clock.advance(3);
       }
       LDH(Operand::HighMemoryRegister(Register::C), Operand::Register(Register::A)) => {
@@ -205,9 +205,9 @@ impl Cpu {
         self.clock.advance(2);
       }
 
-      ADC(Operand::Register(Register::A), Operand::Register(src)) => {
+      &ADC(Operand::Register(Register::A), Operand::Register(src)) => {
         let is_carry_set = is_flag_set!(self.flags, Flag::C as u8);
-        let reg_value = self.read_register(hardware, *src);
+        let reg_value = self.read_register(hardware, src);
         let res = self
           .registers
           .a
@@ -234,12 +234,12 @@ impl Cpu {
           self.clock.tick();
         }
       }
-      ADC(Operand::Register(Register::A), Operand::Byte(byte)) => {
+      &ADC(Operand::Register(Register::A), Operand::Byte(byte)) => {
         let is_carry_set = is_flag_set!(self.flags, Flag::C as u8);
         let res = self
           .registers
           .a
-          .wrapping_add(*byte)
+          .wrapping_add(byte)
           .wrapping_add(is_carry_set as u8);
 
         self.registers.a = res;
@@ -248,17 +248,17 @@ impl Cpu {
         self.toggle_flag(Flag::N, false);
         self.toggle_flag(
           Flag::H,
-          (res & 0x0F) + (*byte & 0x0F) + (is_carry_set as u8 & 0x0F) > 0x0F,
+          (res & 0x0F) + (byte & 0x0F) + (is_carry_set as u8 & 0x0F) > 0x0F,
         );
         self.toggle_flag(
           Flag::C,
-          (res as u16 + *byte as u16 + is_carry_set as u16) > u8::MAX as u16,
+          (res as u16 + byte as u16 + is_carry_set as u16) > u8::MAX as u16,
         );
 
         self.clock.advance(2);
       }
-      ADD(Operand::Register(Register::A), Operand::Register(src)) => {
-        let reg_value = self.read_register(hardware, *src);
+      &ADD(Operand::Register(Register::A), Operand::Register(src)) => {
+        let reg_value = self.read_register(hardware, src);
         let res = self.registers.a.wrapping_add(reg_value);
 
         self.registers.a = res;
@@ -275,21 +275,21 @@ impl Cpu {
           self.clock.tick();
         }
       }
-      ADD(Operand::Register(Register::A), Operand::Byte(byte)) => {
-        let res = self.registers.a.wrapping_add(*byte);
+      &ADD(Operand::Register(Register::A), Operand::Byte(byte)) => {
+        let res = self.registers.a.wrapping_add(byte);
 
         self.registers.a = res;
 
         self.toggle_flag(Flag::Z, res == 0);
         self.toggle_flag(Flag::N, false);
-        self.toggle_flag(Flag::H, (res & 0x0F) + (*byte & 0x0F) > 0x0F);
-        self.toggle_flag(Flag::C, (res as u16 + *byte as u16) > u8::MAX as u16);
+        self.toggle_flag(Flag::H, (res & 0x0F) + (byte & 0x0F) > 0x0F);
+        self.toggle_flag(Flag::C, (res as u16 + byte as u16) > u8::MAX as u16);
 
         self.clock.advance(2);
       }
-      ADD(Operand::RegisterPair(RegisterPair::HL), Operand::RegisterPair(src)) => {
+      &ADD(Operand::RegisterPair(RegisterPair::HL), Operand::RegisterPair(src)) => {
         let hl_value = ((self.registers.h as u16) << 8) | self.registers.l as u16;
-        let rp_value = self.read_register_pair(*src);
+        let rp_value = self.read_register_pair(src);
         let res = hl_value.wrapping_add(rp_value);
 
         self.registers.h = ((res >> 8) & 0xFF) as u8;
@@ -301,9 +301,9 @@ impl Cpu {
 
         self.clock.advance(2);
       }
-      ADD(Operand::RegisterPair(RegisterPair::SP), Operand::Byte(value)) => {
+      &ADD(Operand::RegisterPair(RegisterPair::SP), Operand::Byte(value)) => {
         // Sign extend the number
-        let num = *value as i8 as u16;
+        let num = value as i8 as u16;
         let sp_value = self.registers.sp;
 
         self.registers.sp = sp_value.wrapping_add(num);
@@ -315,8 +315,8 @@ impl Cpu {
 
         self.clock.advance(4);
       }
-      AND(Operand::Register(Register::A), Operand::Register(src_reg)) => {
-        let src_value = self.read_register(hardware, *src_reg);
+      &AND(Operand::Register(Register::A), Operand::Register(src_reg)) => {
+        let src_value = self.read_register(hardware, src_reg);
         let res = self.registers.a & src_value;
 
         self.registers.a = res;
@@ -333,8 +333,8 @@ impl Cpu {
           self.clock.tick();
         }
       }
-      AND(Operand::Register(Register::A), Operand::Byte(value)) => {
-        let res = self.registers.a & *value;
+      &AND(Operand::Register(Register::A), Operand::Byte(value)) => {
+        let res = self.registers.a & value;
 
         self.registers.a = res;
 
@@ -345,8 +345,8 @@ impl Cpu {
 
         self.clock.advance(2);
       }
-      CP(Operand::Register(Register::A), Operand::Register(src_reg)) => {
-        let src_value = self.read_register(hardware, *src_reg);
+      &CP(Operand::Register(Register::A), Operand::Register(src_reg)) => {
+        let src_value = self.read_register(hardware, src_reg);
         let res = self.registers.a.wrapping_sub(src_value);
 
         self.clock.tick();
@@ -361,21 +361,21 @@ impl Cpu {
           self.clock.tick();
         }
       }
-      CP(Operand::Register(Register::A), Operand::Byte(value)) => {
-        let res = self.registers.a.wrapping_sub(*value);
+      &CP(Operand::Register(Register::A), Operand::Byte(value)) => {
+        let res = self.registers.a.wrapping_sub(value);
 
         self.toggle_flag(Flag::Z, res == 0);
         self.toggle_flag(Flag::N, true);
-        self.toggle_flag(Flag::H, (self.registers.a & 0x0F) < (*value & 0x0F));
-        self.toggle_flag(Flag::C, self.registers.a < *value);
+        self.toggle_flag(Flag::H, (self.registers.a & 0x0F) < (value & 0x0F));
+        self.toggle_flag(Flag::C, self.registers.a < value);
 
         self.clock.advance(2);
       }
-      DEC(Operand::Register(reg)) => {
-        let reg_value = self.read_register(hardware, *reg);
+      &DEC(Operand::Register(reg)) => {
+        let reg_value = self.read_register(hardware, reg);
         let res = reg_value.wrapping_sub(1);
 
-        self.write_register(hardware, *reg, res);
+        self.write_register(hardware, reg, res);
 
         self.toggle_flag(Flag::Z, res == 0);
         self.toggle_flag(Flag::N, true);
@@ -388,18 +388,18 @@ impl Cpu {
           self.clock.advance(2);
         }
       }
-      DEC(Operand::RegisterPair(rp)) => {
-        let reg_value = self.read_register_pair(*rp);
+      &DEC(Operand::RegisterPair(rp)) => {
+        let reg_value = self.read_register_pair(rp);
         let res = reg_value.wrapping_sub(1);
 
-        self.write_register_pair(*rp, res);
+        self.write_register_pair(rp, res);
         self.clock.advance(2);
       }
-      INC(Operand::Register(reg)) => {
-        let reg_value = self.read_register(hardware, *reg);
+      &INC(Operand::Register(reg)) => {
+        let reg_value = self.read_register(hardware, reg);
         let res = reg_value.wrapping_add(1);
 
-        self.write_register(hardware, *reg, res);
+        self.write_register(hardware, reg, res);
 
         self.toggle_flag(Flag::Z, res == 0);
         self.toggle_flag(Flag::N, false);
@@ -412,15 +412,15 @@ impl Cpu {
           self.clock.advance(2);
         }
       }
-      INC(Operand::RegisterPair(rp)) => {
-        let reg_value = self.read_register_pair(*rp);
+      &INC(Operand::RegisterPair(rp)) => {
+        let reg_value = self.read_register_pair(rp);
         let res = reg_value.wrapping_add(1);
 
-        self.write_register_pair(*rp, res);
+        self.write_register_pair(rp, res);
         self.clock.advance(2);
       }
-      OR(Operand::Register(Register::A), Operand::Register(reg)) => {
-        let reg_value = self.read_register(hardware, *reg);
+      &OR(Operand::Register(Register::A), Operand::Register(reg)) => {
+        let reg_value = self.read_register(hardware, reg);
         let res = self.registers.a | reg_value;
 
         self.registers.a = res;
@@ -437,8 +437,8 @@ impl Cpu {
           self.clock.tick();
         }
       }
-      OR(Operand::Register(Register::A), Operand::Byte(value)) => {
-        let res = self.registers.a | *value;
+      &OR(Operand::Register(Register::A), Operand::Byte(value)) => {
+        let res = self.registers.a | value;
 
         self.registers.a = res;
 
@@ -449,9 +449,9 @@ impl Cpu {
 
         self.clock.advance(2);
       }
-      SBC(Operand::Register(Register::A), Operand::Register(reg)) => {
+      &SBC(Operand::Register(Register::A), Operand::Register(reg)) => {
         let is_carry_set = is_flag_set!(self.flags, Flag::C as u8) as u8;
-        let reg_value = self.read_register(hardware, *reg);
+        let reg_value = self.read_register(hardware, reg);
         let a_value = self.registers.a;
         let res = a_value.wrapping_sub(reg_value).wrapping_sub(is_carry_set);
 
@@ -475,25 +475,25 @@ impl Cpu {
           self.clock.tick();
         }
       }
-      SBC(Operand::Register(Register::A), Operand::Byte(value)) => {
+      &SBC(Operand::Register(Register::A), Operand::Byte(value)) => {
         let is_carry_set = is_flag_set!(self.flags, Flag::C as u8) as u8;
         let a_value = self.registers.a;
-        let res = a_value.wrapping_sub(*value).wrapping_sub(is_carry_set);
+        let res = a_value.wrapping_sub(value).wrapping_sub(is_carry_set);
 
         self.registers.a = res;
 
         self.toggle_flag(Flag::Z, res == 0);
         self.toggle_flag(Flag::N, true);
-        self.toggle_flag(Flag::H, (a_value & 0x0F) < ((*value & 0x0F) + is_carry_set));
+        self.toggle_flag(Flag::H, (a_value & 0x0F) < ((value & 0x0F) + is_carry_set));
         self.toggle_flag(
           Flag::C,
-          (a_value as u16) < (*value as u16 + is_carry_set as u16),
+          (a_value as u16) < (value as u16 + is_carry_set as u16),
         );
 
         self.clock.advance(2);
       }
-      SUB(Operand::Register(Register::A), Operand::Register(reg)) => {
-        let reg_value = self.read_register(hardware, *reg);
+      &SUB(Operand::Register(Register::A), Operand::Register(reg)) => {
+        let reg_value = self.read_register(hardware, reg);
         let a_value = self.registers.a;
         let res = a_value.wrapping_sub(reg_value);
 
@@ -511,21 +511,21 @@ impl Cpu {
           self.clock.tick();
         }
       }
-      SUB(Operand::Register(Register::A), Operand::Byte(value)) => {
+      &SUB(Operand::Register(Register::A), Operand::Byte(value)) => {
         let a_value = self.registers.a;
-        let res = a_value.wrapping_sub(*value);
+        let res = a_value.wrapping_sub(value);
 
         self.registers.a = res;
 
         self.toggle_flag(Flag::Z, res == 0);
         self.toggle_flag(Flag::N, true);
-        self.toggle_flag(Flag::H, (a_value & 0x0F) < (*value & 0x0F));
-        self.toggle_flag(Flag::C, a_value < *value);
+        self.toggle_flag(Flag::H, (a_value & 0x0F) < (value & 0x0F));
+        self.toggle_flag(Flag::C, a_value < value);
 
         self.clock.advance(2);
       }
-      XOR(Operand::Register(Register::A), Operand::Register(reg)) => {
-        let reg_value = self.read_register(hardware, *reg);
+      &XOR(Operand::Register(Register::A), Operand::Register(reg)) => {
+        let reg_value = self.read_register(hardware, reg);
         let res = self.registers.a ^ reg_value;
 
         self.registers.a = res;
@@ -542,8 +542,8 @@ impl Cpu {
           self.clock.tick();
         }
       }
-      XOR(Operand::Register(Register::A), Operand::Byte(value)) => {
-        let res = self.registers.a ^ *value;
+      &XOR(Operand::Register(Register::A), Operand::Byte(value)) => {
+        let res = self.registers.a ^ value;
 
         self.registers.a = res;
 
@@ -587,8 +587,8 @@ impl Cpu {
         self.clock.tick();
       }
 
-      CALL(Some(Operand::Conditional(flag)), Operand::Word(address)) => {
-        let should_jump = self.is_conditional_flag_set(*flag);
+      &CALL(Some(Operand::Conditional(flag)), Operand::Word(address)) => {
+        let should_jump = self.is_conditional_flag_set(flag);
 
         if should_jump {
           let upper = ((self.registers.pc >> 8) & 0xFF) as u8;
@@ -597,36 +597,36 @@ impl Cpu {
           hardware.write_byte(self.registers.sp - 1, upper);
           hardware.write_byte(self.registers.sp - 2, lower);
 
-          self.registers.pc = *address;
+          self.registers.pc = address;
           self.registers.sp -= 2;
           self.clock.advance(6);
         } else {
           self.clock.advance(3);
         }
       }
-      CALL(None, Operand::Word(address)) => {
+      &CALL(None, Operand::Word(address)) => {
         let upper = ((self.registers.pc >> 8) & 0xFF) as u8;
         let lower = (self.registers.pc & 0xFF) as u8;
 
         hardware.write_byte(self.registers.sp - 1, upper);
         hardware.write_byte(self.registers.sp - 2, lower);
 
-        self.registers.pc = *address;
+        self.registers.pc = address;
         self.registers.sp -= 2;
         self.clock.advance(6);
       }
-      JP(Some(Operand::Conditional(flag)), Operand::Word(address)) => {
-        let should_jump = self.is_conditional_flag_set(*flag);
+      &JP(Some(Operand::Conditional(flag)), Operand::Word(address)) => {
+        let should_jump = self.is_conditional_flag_set(flag);
 
         if should_jump {
-          self.registers.pc = *address;
+          self.registers.pc = address;
           self.clock.advance(4);
         } else {
           self.clock.advance(3);
         }
       }
-      JP(None, Operand::Word(address)) => {
-        self.registers.pc = *address;
+      &JP(None, Operand::Word(address)) => {
+        self.registers.pc = address;
         self.clock.advance(4);
       }
       JP(None, Operand::RegisterPair(RegisterPair::HL)) => {
@@ -635,24 +635,24 @@ impl Cpu {
         self.registers.pc = address;
         self.clock.tick();
       }
-      JR(Some(Operand::Conditional(flag)), Operand::Byte(offset)) => {
-        let should_jump = self.is_conditional_flag_set(*flag);
+      &JR(Some(Operand::Conditional(flag)), Operand::Byte(offset)) => {
+        let should_jump = self.is_conditional_flag_set(flag);
 
         if should_jump {
           // The byte can be negative, so sign-extend add the value
-          self.registers.pc = self.registers.pc.wrapping_add(*offset as i8 as u16);
+          self.registers.pc = self.registers.pc.wrapping_add(offset as i8 as u16);
           self.clock.advance(3);
         } else {
           self.clock.advance(2);
         }
       }
-      JR(None, Operand::Byte(offset)) => {
+      &JR(None, Operand::Byte(offset)) => {
         // NOTE: The byte can be negative, so sign-extend add the value
-        self.registers.pc = self.registers.pc.wrapping_add(*offset as i8 as u16);
+        self.registers.pc = self.registers.pc.wrapping_add(offset as i8 as u16);
         self.clock.advance(3);
       }
-      RET(Some(Operand::Conditional(flag))) => {
-        let should_jump = self.is_conditional_flag_set(*flag);
+      &RET(Some(Operand::Conditional(flag))) => {
+        let should_jump = self.is_conditional_flag_set(flag);
 
         if should_jump {
           let lower = hardware.read_byte(self.registers.sp);
@@ -682,7 +682,7 @@ impl Cpu {
         self.master_interrupt_enabled = true;
         self.clock.advance(4);
       }
-      RST(Operand::Byte(target)) => {
+      &RST(Operand::Byte(target)) => {
         let upper = ((self.registers.pc >> 8) & 0xFF) as u8;
         let lower = (self.registers.pc & 0xFF) as u8;
 
@@ -690,7 +690,7 @@ impl Cpu {
         hardware.write_byte(self.registers.sp - 2, lower);
 
         self.registers.h = 0;
-        self.registers.l = *target;
+        self.registers.l = target;
         self.registers.sp -= 2;
         self.clock.advance(4);
       }
@@ -706,18 +706,18 @@ impl Cpu {
         self.clock.tick();
       }
 
-      POP(Operand::RegisterPair(rp)) => {
+      &POP(Operand::RegisterPair(rp)) => {
         let lower = hardware.read_byte(self.registers.sp);
         let upper = hardware.read_byte(self.registers.sp + 1);
         let value = ((upper as u16) << 8) | lower as u16;
 
-        self.write_register_pair(*rp, value);
+        self.write_register_pair(rp, value);
 
         self.registers.sp = self.registers.sp.wrapping_add(2);
         self.clock.advance(4);
       }
-      PUSH(Operand::RegisterPair(rp)) => {
-        let reg_value = self.read_register_pair(*rp);
+      &PUSH(Operand::RegisterPair(rp)) => {
+        let reg_value = self.read_register_pair(rp);
         let upper = ((reg_value >> 8) & 0xFF) as u8;
         let lower = (reg_value & 0xFF) as u8;
 
@@ -813,8 +813,8 @@ impl Cpu {
         self.clock.tick();
       }
 
-      BIT(Operand::Byte(bit), Operand::Register(reg)) => {
-        let reg_value = self.read_register(hardware, *reg);
+      &BIT(Operand::Byte(bit), Operand::Register(reg)) => {
+        let reg_value = self.read_register(hardware, reg);
         let extracted_bit = (reg_value >> bit) & 1;
 
         self.toggle_flag(Flag::Z, extracted_bit == 0);
@@ -828,11 +828,11 @@ impl Cpu {
           self.clock.tick();
         }
       }
-      RES(Operand::Byte(bit), Operand::Register(reg)) => {
-        let reg_value = self.read_register(hardware, *reg);
+      &RES(Operand::Byte(bit), Operand::Register(reg)) => {
+        let reg_value = self.read_register(hardware, reg);
         let new_value = reg_value & !(1 << bit);
 
-        self.write_register(hardware, *reg, new_value);
+        self.write_register(hardware, reg, new_value);
         self.clock.advance(2);
 
         // Advance 2 machine cycles since we fetched and wrote to memory
@@ -840,23 +840,23 @@ impl Cpu {
           self.clock.advance(2);
         }
       }
-      SET(Operand::Byte(bit), Operand::Register(reg)) => {
-        let reg_value = self.read_register(hardware, *reg);
+      &SET(Operand::Byte(bit), Operand::Register(reg)) => {
+        let reg_value = self.read_register(hardware, reg);
         let new_value = reg_value | (1 << bit);
 
-        self.write_register(hardware, *reg, new_value);
+        self.write_register(hardware, reg, new_value);
         self.clock.advance(2);
 
         if matches!(reg, Register::M) {
           self.clock.advance(2);
         }
       }
-      RL(Operand::Register(reg)) => {
-        let reg_value = self.read_register(hardware, *reg);
+      &RL(Operand::Register(reg)) => {
+        let reg_value = self.read_register(hardware, reg);
         let is_carry_set = is_flag_set!(self.flags, Flag::C as u8) as u8;
         let res = (reg_value << 1) | is_carry_set;
 
-        self.write_register(hardware, *reg, res);
+        self.write_register(hardware, reg, res);
 
         self.toggle_flag(Flag::Z, res == 0);
         self.toggle_flag(Flag::N, false);
@@ -870,11 +870,11 @@ impl Cpu {
           self.clock.advance(2);
         }
       }
-      RLC(Operand::Register(reg)) => {
-        let reg_value = self.read_register(hardware, *reg);
+      &RLC(Operand::Register(reg)) => {
+        let reg_value = self.read_register(hardware, reg);
         let res = reg_value.rotate_left(1);
 
-        self.write_register(hardware, *reg, res);
+        self.write_register(hardware, reg, res);
 
         self.toggle_flag(Flag::Z, res == 0);
         self.toggle_flag(Flag::N, false);
@@ -888,12 +888,12 @@ impl Cpu {
           self.clock.advance(2);
         }
       }
-      RR(Operand::Register(reg)) => {
-        let reg_value = self.read_register(hardware, *reg);
+      &RR(Operand::Register(reg)) => {
+        let reg_value = self.read_register(hardware, reg);
         let is_carry_set = is_flag_set!(self.flags, Flag::C as u8) as u8;
         let res = (reg_value >> 1) | (is_carry_set << 7);
 
-        self.write_register(hardware, *reg, res);
+        self.write_register(hardware, reg, res);
 
         self.toggle_flag(Flag::Z, res == 0);
         self.toggle_flag(Flag::N, false);
@@ -907,11 +907,11 @@ impl Cpu {
           self.clock.advance(2);
         }
       }
-      RRC(Operand::Register(reg)) => {
-        let reg_value = self.read_register(hardware, *reg);
+      &RRC(Operand::Register(reg)) => {
+        let reg_value = self.read_register(hardware, reg);
         let res = reg_value.rotate_right(1);
 
-        self.write_register(hardware, *reg, res);
+        self.write_register(hardware, reg, res);
 
         self.toggle_flag(Flag::Z, res == 0);
         self.toggle_flag(Flag::N, false);
@@ -925,11 +925,11 @@ impl Cpu {
           self.clock.advance(2);
         }
       }
-      SLA(Operand::Register(reg)) => {
-        let reg_value = self.read_register(hardware, *reg);
+      &SLA(Operand::Register(reg)) => {
+        let reg_value = self.read_register(hardware, reg);
         let res = reg_value << 1;
 
-        self.write_register(hardware, *reg, res);
+        self.write_register(hardware, reg, res);
 
         self.toggle_flag(Flag::Z, res == 0);
         self.toggle_flag(Flag::N, false);
@@ -943,12 +943,12 @@ impl Cpu {
           self.clock.advance(2);
         }
       }
-      SRA(Operand::Register(reg)) => {
-        let reg_value = self.read_register(hardware, *reg);
+      &SRA(Operand::Register(reg)) => {
+        let reg_value = self.read_register(hardware, reg);
         // SRA preserves the sign bit (MSB)
         let res = (reg_value >> 1) | (reg_value & 0x80);
 
-        self.write_register(hardware, *reg, res);
+        self.write_register(hardware, reg, res);
 
         self.toggle_flag(Flag::Z, res == 0);
         self.toggle_flag(Flag::N, false);
@@ -962,11 +962,11 @@ impl Cpu {
           self.clock.advance(2);
         }
       }
-      SRL(Operand::Register(reg)) => {
-        let reg_value = self.read_register(hardware, *reg);
+      &SRL(Operand::Register(reg)) => {
+        let reg_value = self.read_register(hardware, reg);
         let res = reg_value >> 1;
 
-        self.write_register(hardware, *reg, res);
+        self.write_register(hardware, reg, res);
 
         self.toggle_flag(Flag::Z, res == 0);
         self.toggle_flag(Flag::N, false);
@@ -980,13 +980,13 @@ impl Cpu {
           self.clock.advance(2);
         }
       }
-      SWAP(Operand::Register(reg)) => {
-        let reg_value = self.read_register(hardware, *reg);
+      &SWAP(Operand::Register(reg)) => {
+        let reg_value = self.read_register(hardware, reg);
         let lower = reg_value & 0x0F;
         let upper = reg_value & 0xF0;
         let res = (lower << 4) | (upper >> 4);
 
-        self.write_register(hardware, *reg, res);
+        self.write_register(hardware, reg, res);
 
         self.toggle_flag(Flag::Z, res == 0);
         self.toggle_flag(Flag::N, false);
