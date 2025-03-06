@@ -20,10 +20,3 @@ fn main() {
   // let memory = Memory::new(file);
   // let cpu = Cpu::new(memory);
 }
-
-#[macro_export]
-macro_rules! is_flag_set {
-  ($num:expr, $mask:expr) => {
-    ($num & $mask) == $mask
-  };
-}

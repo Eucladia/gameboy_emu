@@ -1,6 +1,6 @@
 use crate::{
+  flags::{add_flag, is_flag_set, remove_flag},
   interrupts::{Interrupt, Interrupts},
-  is_flag_set,
 };
 
 /// The pixel processing unit.
@@ -37,8 +37,6 @@ pub struct Ppu {
   wy: u8,
   /// Window X position.
   wx: u8,
-  /// The mode that the PPU is in.
-  mode: PpuMode,
 
   /// Internal counter for tracking cycles.
   counter: usize,
@@ -49,72 +47,12 @@ pub struct Ppu {
   pub dma_transfer: Option<DmaTransfer>,
 }
 
-/// Attributes that sprites can have.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-#[repr(u8)]
-enum SpriteAttributes {
-  /// The color palette for the sprite (DMG).
-  DmgPalette = 1 << 4,
-  /// Whether the sprite should be flipped vertically.
-  XFlip = 1 << 5,
-  /// Whether the sprite should be flipped horizontally.
-  YFlip = 1 << 6,
-  /// The priority of this sprite. 0 indicates lower priority over the
-  /// background and window colors.
-  Priority = 1 << 7,
-}
-
-/// The LCD control byte.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-#[repr(u8)]
-enum LcdControl {
-  /// Whether the background should be displayed.
-  BackgroundDisplay = 1 << 0,
-  /// Whether the sprites should be displayed.
-  SpriteDisplay = 1 << 1,
-  /// The dimensions of the sprite. 0 indicates 8x8 and 1 indicates 8x16.
-  SpriteDimensions = 1 << 2,
-  /// The background tile map. 0 indicates address space [0x9800, 0x9C00) and 1 indicates
-  /// [0x9C00, 0xA000).
-  BackgroundTileMap = 1 << 3,
-  /// The background tile data. 0 indicates address space [0x8800, 0x9800) and 1 indicates
-  /// [0x8000, 0x9000).
-  BackgroundTileData = 1 << 4,
-  /// Whether the window should be displayed.
-  WindowDisplay = 1 << 5,
-  /// The window tile map map. 0 indicates address space [0x9800, 0x9C00) and 1 indicates
-  /// [0x9C00, 0xA000).
-  WindowTileMap = 1 << 6,
-  /// Whether the LCD should be on.
-  LcdDisplay = 1 << 7,
-}
-
-/// The state of a direct memory transfer.
-#[derive(Debug, Clone)]
-pub enum DmaTransfer {
-  /// A DMA transfer was requested.
-  Requested,
-  /// A DMA transfer is going to begin.
-  Starting,
-  /// A DMA transfer is in progress.
-  Transferring { current_pos: u8 },
-}
-
-/// The different modes the PPU can be in.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u8)]
-enum PpuMode {
-  HBlank = 0,
-  VBlank = 1,
-  OamScan = 2,
-  PixelTransfer = 3,
-}
-
 impl Ppu {
   pub fn new() -> Self {
     Self {
       lcdc: 0,
-      stat: 0,
+      // The default mode is the OAM being used
+      stat: PpuMode::OamScan as u8,
       scy: 0,
       scx: 0,
       ly: 0,
@@ -125,7 +63,7 @@ impl Ppu {
       obp1: 0,
       wy: 0,
       wx: 0,
-      mode: PpuMode::OamScan,
+
       counter: 0,
 
       dma: 0,
@@ -141,20 +79,28 @@ impl Ppu {
   pub fn step(&mut self, interrupts: &mut Interrupts, cycles: usize) {
     self.counter += cycles;
 
-    match self.mode {
+    match self.ppu_mode() {
       // OAM scan lasts for 80 cycles
       PpuMode::OamScan => {
         if self.counter >= OAM_CYCLE_COUNT {
           self.counter -= OAM_CYCLE_COUNT;
-          self.mode = PpuMode::PixelTransfer;
+          self.set_ppu_mode(PpuMode::PixelTransfer);
+
+          if is_flag_set!(self.stat, StatFlag::OamInterrupt as u8) {
+            interrupts.request_interrupt(Interrupt::Lcd)
+          }
         }
       }
       // Pixel transfer lasts for 172 cycles
       PpuMode::PixelTransfer => {
         if self.counter >= PIXEL_TRANSFER_CYCLE_COUNT {
           self.counter -= PIXEL_TRANSFER_CYCLE_COUNT;
-          self.mode = PpuMode::HBlank;
+          self.set_ppu_mode(PpuMode::HBlank);
           self.render_scanline();
+
+          if is_flag_set!(self.stat, StatFlag::HBlankInterrupt as u8) {
+            interrupts.request_interrupt(Interrupt::Lcd);
+          }
         }
       }
       // HBlank last for 204 cycles
@@ -163,12 +109,24 @@ impl Ppu {
           self.counter -= H_BLANK_CYCLE_COUNT;
           self.ly += 1;
 
-          // Enter VBlank on the last line
-          if self.ly == 144 {
-            self.mode = PpuMode::VBlank;
-            interrupts.request_interrupt(Interrupt::VBlank);
+          if self.ly == self.lyc {
+            self.stat = add_flag!(self.stat, StatFlag::Coincidence as u8);
+
+            if is_flag_set!(self.stat, StatFlag::LycInterrupt as u8) {
+              interrupts.request_interrupt(Interrupt::Lcd);
+            }
           } else {
-            self.mode = PpuMode::OamScan;
+            self.stat = remove_flag!(self.stat, StatFlag::Coincidence as u8);
+          }
+
+          if self.ly == 144 {
+            self.set_ppu_mode(PpuMode::VBlank);
+
+            if is_flag_set!(self.stat, StatFlag::VBlankInterrupt as u8) {
+              interrupts.request_interrupt(Interrupt::VBlank);
+            }
+          } else {
+            self.set_ppu_mode(PpuMode::OamScan);
           }
         }
       }
@@ -178,28 +136,22 @@ impl Ppu {
           self.counter -= V_BLANK_CYCLE_COUNT;
           self.ly += 1;
 
-          // Check for the end of the VBlank
+          if self.ly == self.lyc {
+            self.stat = add_flag!(self.stat, StatFlag::Coincidence as u8);
+
+            if is_flag_set!(self.stat, StatFlag::LycInterrupt as u8) {
+              interrupts.request_interrupt(Interrupt::Lcd);
+            }
+          } else {
+            self.stat = remove_flag!(self.stat, StatFlag::Coincidence as u8);
+          }
+
           if self.ly > 153 {
             self.ly = 0;
-            self.mode = PpuMode::OamScan;
+            self.set_ppu_mode(PpuMode::OamScan);
           }
         }
       }
-    }
-
-    // Bits 0 & 1 are the mode
-    self.stat = (self.stat & 0b1111_1100) | (self.mode as u8);
-
-    if self.ly == self.lyc {
-      // Set the coincidence flag
-      self.stat |= 0x4;
-
-      if self.stat & 0b0100_0000 == 1 {
-        interrupts.request_interrupt(Interrupt::LCD);
-      }
-    } else {
-      // Unset the coincidence flag
-      self.stat &= !0x4;
     }
 
     // Increment the window scanline only if it's visible
@@ -233,7 +185,8 @@ impl Ppu {
   pub fn write_register(&mut self, address: u16, value: u8) {
     match address {
       0xFF40 => self.lcdc = value,
-      0xFF41 => self.stat = value,
+      // Preserve the PPU mode in the lower 2 bits
+      0xFF41 => self.stat = (value & 0b0111_1100) | self.ppu_mode() as u8,
       0xFF42 => self.scy = value,
       0xFF43 => self.scx = value,
       // Writing to LY resets it
@@ -270,6 +223,17 @@ impl Ppu {
   /// Writes 8-bits of OAM memory to the provided address.
   pub fn write_oam(&mut self, address: u16, value: u8) {
     self.oam[(address - 0xFE00) as usize] = value;
+  }
+
+  /// Returns the mode that the PPU is in.
+  pub fn ppu_mode(&self) -> PpuMode {
+    PpuMode::try_from(self.stat & 0x03).unwrap()
+  }
+
+  /// Sets the mode of the PPU.
+  fn set_ppu_mode(&mut self, mode: PpuMode) {
+    // The 7th bit is unused the the lower 2 bits store the mode
+    self.stat = (self.stat & 0b0111_1100) | mode as u8;
   }
 
   /// Fetches a pixel from the given tile index, row (0-7 inclusive),
@@ -409,7 +373,7 @@ impl Ppu {
       }
 
       // NOTE: We have to do this because `array_chunks` isn't stable. It's a bit ugly,
-      // but its looks better than iterating over the indices and offset into the OAM
+      // but its looks better than iterating over the indices and offsetting into the OAM
       let (raw_y, raw_x, tile_index, attributes) = match chunk {
         &[a, b, c, d] => (a, b, c, d),
         _ => unreachable!(),
@@ -491,6 +455,104 @@ impl Ppu {
         *pixel = (palette >> (color << 1)) & 0x03;
       }
     }
+  }
+}
+
+/// Flags for the `stat` field.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[repr(u8)]
+pub enum StatFlag {
+  /// Coincidence flag that is set when `LY` is equal to `LYC`.
+  Coincidence = 1 << 2,
+  /// HBlank interrupt enable.
+  HBlankInterrupt = 1 << 3,
+  /// VBlank interrupt enable.
+  VBlankInterrupt = 1 << 4,
+  /// OAM interrupt enable.
+  OamInterrupt = 1 << 5,
+  /// Interrupt enable when the coincidence flag is set.
+  LycInterrupt = 1 << 6,
+}
+
+/// The different modes the PPU can be in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(u8)]
+pub enum PpuMode {
+  HBlank = 0b00,
+  VBlank = 0b01,
+  OamScan = 0b10,
+  PixelTransfer = 0b11,
+}
+
+impl PpuMode {
+  /// Converts the 2-bit value into a [`PpuMode`].
+  pub fn from_bits(bits: u8) -> Option<PpuMode> {
+    Self::try_from(bits).ok()
+  }
+}
+
+/// Attributes that sprites can have.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[repr(u8)]
+enum SpriteAttributes {
+  /// The color palette for the sprite (DMG).
+  DmgPalette = 1 << 4,
+  /// Whether the sprite should be flipped vertically.
+  XFlip = 1 << 5,
+  /// Whether the sprite should be flipped horizontally.
+  YFlip = 1 << 6,
+  /// The priority of this sprite. 0 indicates lower priority over the
+  /// background and window colors.
+  Priority = 1 << 7,
+}
+
+/// The LCD control byte.
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[repr(u8)]
+enum LcdControl {
+  /// Whether the background should be displayed.
+  BackgroundDisplay = 1 << 0,
+  /// Whether the sprites should be displayed.
+  SpriteDisplay = 1 << 1,
+  /// The dimensions of the sprite. 0 indicates 8x8 and 1 indicates 8x16.
+  SpriteDimensions = 1 << 2,
+  /// The background tile map. 0 indicates address space [0x9800, 0x9C00) and 1 indicates
+  /// [0x9C00, 0xA000).
+  BackgroundTileMap = 1 << 3,
+  /// The background tile data. 0 indicates address space [0x8800, 0x9800) and 1 indicates
+  /// [0x8000, 0x9000).
+  BackgroundTileData = 1 << 4,
+  /// Whether the window should be displayed.
+  WindowDisplay = 1 << 5,
+  /// The window tile map map. 0 indicates address space [0x9800, 0x9C00) and 1 indicates
+  /// [0x9C00, 0xA000).
+  WindowTileMap = 1 << 6,
+  /// Whether the LCD should be on.
+  LcdDisplay = 1 << 7,
+}
+
+/// The state of a direct memory transfer.
+#[derive(Debug, Clone)]
+pub enum DmaTransfer {
+  /// A DMA transfer was requested.
+  Requested,
+  /// A DMA transfer is going to begin.
+  Starting,
+  /// A DMA transfer is in progress.
+  Transferring { current_pos: u8 },
+}
+
+impl TryFrom<u8> for PpuMode {
+  type Error = ();
+
+  fn try_from(bits: u8) -> Result<Self, Self::Error> {
+    Ok(match bits {
+      0b00 => Self::HBlank,
+      0b01 => Self::VBlank,
+      0b10 => Self::OamScan,
+      0b11 => Self::PixelTransfer,
+      _ => return Err(()),
+    })
   }
 }
 
