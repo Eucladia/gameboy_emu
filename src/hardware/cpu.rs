@@ -1,6 +1,7 @@
 use crate::{
   flags::{ConditionalFlag, Flag, add_flag, is_flag_set, remove_flag},
   hardware::Hardware,
+  hardware::ppu::DmaTransfer,
   hardware::registers::{Register, RegisterPair, Registers},
   instructions::{Instruction, Operand},
 };
@@ -44,12 +45,13 @@ impl Cpu {
 
   /// Executes one cycle, returning the number of T-cycles taken.
   pub fn step(&mut self, hardware: &mut Hardware) -> usize {
-    let byte = self.fetch_instruction(hardware);
+    let prev_opcode = self.registers.ir;
+    let instruction_byte = self.fetch_instruction(hardware);
 
     self.registers.pc = self.registers.pc.wrapping_add(1);
-    self.registers.ir = byte;
+    self.registers.ir = instruction_byte;
 
-    let instruction = self.decode_instruction(byte, hardware);
+    let instruction = self.decode_instruction(instruction_byte, hardware);
     // Subtract a byte since we accounted for the instruction byte itself already
     let i_size = instruction.bytes_occupied() - 1;
 
@@ -59,7 +61,14 @@ impl Cpu {
 
     self.execute_instruction(hardware, &instruction);
 
-    self.clock.t_cycles.wrapping_sub(before)
+    let cycles_taken = self.clock.t_cycles.wrapping_sub(before);
+
+    // The `EI` instruction has a delay of 4 T-cycles
+    if prev_opcode == 0xFB {
+      self.master_interrupt_enabled = true;
+    }
+
+    cycles_taken
   }
 
   /// Fetches the next instruction byte.
@@ -68,9 +77,7 @@ impl Cpu {
     // then the next instruction byte being fetched is the current byte
     // being transferred by the DMA transfer
     let next_byte = match hardware.get_dma_transfer() {
-      Some(super::ppu::DmaTransfer::Transferring { current_pos: index })
-        if self.registers.pc < 0xFF80 =>
-      {
+      Some(DmaTransfer::Transferring { current_pos: index }) if self.registers.pc < 0xFF80 => {
         (*index as u16) << 8
       }
       _ => self.registers.pc,
