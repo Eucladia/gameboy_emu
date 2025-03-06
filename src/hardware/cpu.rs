@@ -594,11 +594,11 @@ impl Cpu {
           let upper = ((self.registers.pc >> 8) & 0xFF) as u8;
           let lower = (self.registers.pc & 0xFF) as u8;
 
-          hardware.write_byte(self.registers.sp - 1, upper);
-          hardware.write_byte(self.registers.sp - 2, lower);
+          hardware.write_byte(self.registers.sp.wrapping_sub(1), upper);
+          hardware.write_byte(self.registers.sp.wrapping_sub(2), lower);
 
           self.registers.pc = address;
-          self.registers.sp -= 2;
+          self.registers.sp = self.registers.sp.wrapping_sub(2);
           self.clock.advance(6);
         } else {
           self.clock.advance(3);
@@ -608,11 +608,11 @@ impl Cpu {
         let upper = ((self.registers.pc >> 8) & 0xFF) as u8;
         let lower = (self.registers.pc & 0xFF) as u8;
 
-        hardware.write_byte(self.registers.sp - 1, upper);
-        hardware.write_byte(self.registers.sp - 2, lower);
+        hardware.write_byte(self.registers.sp.wrapping_sub(1), upper);
+        hardware.write_byte(self.registers.sp.wrapping_sub(2), lower);
 
         self.registers.pc = address;
-        self.registers.sp -= 2;
+        self.registers.sp = self.registers.sp.wrapping_sub(2);
         self.clock.advance(6);
       }
       &JP(Some(Operand::Conditional(flag)), Operand::Word(address)) => {
@@ -656,7 +656,7 @@ impl Cpu {
 
         if should_jump {
           let lower = hardware.read_byte(self.registers.sp);
-          let upper = hardware.read_byte(self.registers.sp + 1);
+          let upper = hardware.read_byte(self.registers.sp.wrapping_add(1));
 
           self.registers.pc = ((upper as u16) << 8) | lower as u16;
           self.registers.sp = self.registers.sp.wrapping_add(2);
@@ -667,7 +667,7 @@ impl Cpu {
       }
       RET(None) => {
         let lower = hardware.read_byte(self.registers.sp);
-        let upper = hardware.read_byte(self.registers.sp + 1);
+        let upper = hardware.read_byte(self.registers.sp.wrapping_add(1));
 
         self.registers.pc = ((upper as u16) << 8) | lower as u16;
         self.registers.sp = self.registers.sp.wrapping_add(2);
@@ -675,7 +675,7 @@ impl Cpu {
       }
       RETI => {
         let lower = hardware.read_byte(self.registers.sp);
-        let upper = hardware.read_byte(self.registers.sp + 1);
+        let upper = hardware.read_byte(self.registers.sp.wrapping_add(1));
 
         self.registers.pc = ((upper as u16) << 8) | lower as u16;
         self.registers.sp = self.registers.sp.wrapping_add(2);
@@ -686,12 +686,12 @@ impl Cpu {
         let upper = ((self.registers.pc >> 8) & 0xFF) as u8;
         let lower = (self.registers.pc & 0xFF) as u8;
 
-        hardware.write_byte(self.registers.sp - 1, upper);
-        hardware.write_byte(self.registers.sp - 2, lower);
+        hardware.write_byte(self.registers.sp.wrapping_sub(1), upper);
+        hardware.write_byte(self.registers.sp.wrapping_sub(2), lower);
 
         self.registers.h = 0;
         self.registers.l = target;
-        self.registers.sp -= 2;
+        self.registers.sp = self.registers.sp.wrapping_sub(2);
         self.clock.advance(4);
       }
       STOP(Operand::Byte(_)) => {
@@ -708,7 +708,7 @@ impl Cpu {
 
       &POP(Operand::RegisterPair(rp)) => {
         let lower = hardware.read_byte(self.registers.sp);
-        let upper = hardware.read_byte(self.registers.sp + 1);
+        let upper = hardware.read_byte(self.registers.sp.wrapping_add(1));
         let value = ((upper as u16) << 8) | lower as u16;
 
         self.write_register_pair(rp, value);
@@ -721,10 +721,10 @@ impl Cpu {
         let upper = ((reg_value >> 8) & 0xFF) as u8;
         let lower = (reg_value & 0xFF) as u8;
 
-        hardware.write_byte(self.registers.sp - 1, upper);
-        hardware.write_byte(self.registers.sp - 2, lower);
+        hardware.write_byte(self.registers.sp.wrapping_sub(1), upper);
+        hardware.write_byte(self.registers.sp.wrapping_sub(2), lower);
 
-        self.registers.sp -= 2;
+        self.registers.sp = self.registers.sp.wrapping_sub(2);
         self.clock.advance(4);
       }
       CCF => {
