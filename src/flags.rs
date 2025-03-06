@@ -50,6 +50,7 @@ pub enum ConditionalFlag {
 }
 
 impl ConditionalFlag {
+  /// Attempts to convert the 2-bit value into a [`ConditionalFlag`].
   pub fn from_bits(bits: u8) -> Option<Self> {
     ConditionalFlag::try_from(bits).ok()
   }

@@ -35,6 +35,7 @@ pub struct Hardware {
 }
 
 impl Hardware {
+  /// Creates a new [`Hardware`] instance from the given bytes.
   pub fn new(bytes: Vec<u8>) -> Self {
     let cartridge = match bytes[CARTRIDGE_TYPE as usize] {
       0 => Cartridge::RomOnly(RomOnly::new(bytes)),
@@ -146,6 +147,7 @@ impl Hardware {
     }
   }
 
+  /// Progresses the DMA transfer, copying the next byte in to the OAM.
   pub fn update_dma_transfer(&mut self, cycles: usize) {
     match self.ppu.dma_transfer {
       Some(DmaTransfer::Requested) => {
@@ -189,6 +191,7 @@ impl Hardware {
     self.ppu.dma_transfer.as_ref()
   }
 
+  /// Reads the I/O registers.
   fn read_io_register(&self, address: u16) -> u8 {
     match address {
       0xFF00 => self.joypad.read_register(),
@@ -200,6 +203,7 @@ impl Hardware {
     }
   }
 
+  /// Writes to the I/O registers.
   fn write_io_register(&mut self, address: u16, value: u8) {
     match address {
       0xFF00 => self.joypad.write_register(value),
@@ -217,4 +221,5 @@ const MEMORY_SIZE: u16 = 0x2000;
 /// The amount of fast, high memory.
 const HIGH_RAM_SIZE: u16 = 0x7F;
 
+/// The address where the cartridge type is stored.
 const CARTRIDGE_TYPE: u16 = 0x147;

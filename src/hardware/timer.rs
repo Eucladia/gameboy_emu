@@ -15,6 +15,7 @@ pub struct Timer {
 }
 
 impl Timer {
+  /// Creates a new [`Timer`].
   pub const fn new() -> Self {
     Self {
       counter: 0,
@@ -25,7 +26,7 @@ impl Timer {
     }
   }
 
-  /// Steps the [`Timer`].
+  /// Steps the timer.
   pub fn step(&mut self, interrupts: &mut Interrupts, cycles: u16) {
     self.counter = self.counter.wrapping_add(cycles);
 
@@ -56,7 +57,7 @@ impl Timer {
     }
   }
 
-  /// Reads from the Timer's registers.
+  /// Reads from the timer's registers.
   pub fn read_register(&self, address: u16) -> u8 {
     match address {
       0xFF04 => self.div,
@@ -67,7 +68,7 @@ impl Timer {
     }
   }
 
-  /// Writes to Timer's registers.
+  /// Writes to timer's registers.
   pub fn write_register(&mut self, address: u16, value: u8) {
     match address {
       // Writing to DIV resets it

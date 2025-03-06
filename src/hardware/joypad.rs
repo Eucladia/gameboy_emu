@@ -16,13 +16,21 @@ pub struct Joypad {
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 #[repr(u8)]
 pub enum Button {
+  /// The `A` button.
   A = 1 << 0,
+  /// The `B` button.
   B = 1 << 1,
+  /// The `Select` button.
   Select = 1 << 2,
+  /// The `Start` button.
   Start = 1 << 3,
+  /// The `Right` button.
   Right = 1 << 4,
+  /// The `Left` button.
   Left = 1 << 5,
+  /// The `Up` button.
   Up = 1 << 6,
+  /// The `Down` button.
   Down = 1 << 7,
 }
 

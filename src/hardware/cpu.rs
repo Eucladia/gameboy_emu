@@ -31,6 +31,7 @@ pub struct Cpu {
 }
 
 impl Cpu {
+  /// Creates a new [`CPU`] in a running state.
   pub fn new() -> Self {
     Self {
       flags: 0,

@@ -48,6 +48,7 @@ pub struct Ppu {
 }
 
 impl Ppu {
+  /// Creates a new [`Ppu`].
   pub fn new() -> Self {
     Self {
       lcdc: 0,
@@ -538,7 +539,7 @@ pub enum DmaTransfer {
   Requested,
   /// A DMA transfer is going to begin.
   Starting,
-  /// A DMA transfer is in progress.
+  /// A DMA transfer is in progress, copying the byte with this index.
   Transferring { current_pos: u8 },
 }
 
