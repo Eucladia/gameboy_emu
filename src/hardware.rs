@@ -56,11 +56,11 @@ impl Hardware {
   pub fn read_byte(&self, address: u16) -> u8 {
     match address {
       // ROM
-      ROM_BANK_0_START..ROM_BANK_0_END => self.cartridge.read_rom(address),
+      0..0x4000 => self.cartridge.read_rom(address),
       // ROM, bank N
-      ROM_BANK_N_START..ROM_BANK_N_END => self.cartridge.read_rom(address),
+      0x4000..0x8000 => self.cartridge.read_rom(address),
       // Video RAM
-      VIDEO_RAM_START..VIDEO_RAM_END => {
+      0x8000..0xA000 => {
         // VRAM is inaccessible during pixel transfer mode
         if matches!(self.ppu.current_mode(), PpuMode::PixelTransfer) {
           0xFF
@@ -69,17 +69,13 @@ impl Hardware {
         }
       }
       // External RAM
-      EXTERNAL_RAM_START..EXTERNAL_RAM_END => self.cartridge.read_ram(address),
+      0xA000..0xC000 => self.cartridge.read_ram(address),
       // Work RAM
-      WORK_RAM_START..WORK_RAM_END => {
-        self.memory[(WORK_RAM_OFFSET + (address - WORK_RAM_START)) as usize]
-      }
+      0xC000..0xE000 => self.memory[(address - 0xC000) as usize],
       // Echo RAM
-      ECHO_RAM_START..ECHO_RAM_END => {
-        self.memory[(WORK_RAM_OFFSET + (address - ECHO_RAM_START)) as usize]
-      }
+      0xE000..0xFE00 => self.memory[(address - 0xE000) as usize],
       // OAM
-      OAM_START..OAM_END => {
+      0xFE00..0xFEA0 => {
         // OAM is inaccessible during OAM and pixel transfer modes
         if matches!(
           self.ppu.current_mode(),
@@ -91,13 +87,13 @@ impl Hardware {
         }
       }
       // Unused
-      UNUSED_START..UNUSED_END => 0xFF,
+      0xFEA0..0xFF00 => 0xFF,
       // I/O Registers
-      IO_REGISTER_START..IO_REGISTER_END => self.read_io_register(address),
+      0xFF00..0xFF80 => self.read_io_register(address),
       // High RAM
-      HIGH_RAM_START..HIGH_RAM_END => self.high_ram[(address - HIGH_RAM_START) as usize],
+      0xFF80..0xFFFF => self.high_ram[(address - 0xFF80) as usize],
       // Interrupt enable register
-      INTERRUPT_ENABLE_REGISTER => self.interrupts.enabled_bitfield(),
+      0xFFFF => self.interrupts.enabled_bitfield(),
     }
   }
 
@@ -113,28 +109,24 @@ impl Hardware {
   pub fn write_byte(&mut self, address: u16, value: u8) {
     match address {
       // ROM
-      ROM_BANK_0_START..ROM_BANK_0_END => self.cartridge.write_rom(address, value),
+      0x0000..0x4000 => self.cartridge.write_rom(address, value),
       // Switchable ROM bank
-      ROM_BANK_N_START..ROM_BANK_N_END => self.cartridge.write_rom(address, value),
+      0x4000..0x8000 => self.cartridge.write_rom(address, value),
       // Video RAM
-      VIDEO_RAM_START..VIDEO_RAM_END => {
+      0x8000..0xA000 => {
         // Writing to VRAM is undefined when in pixel transfer mode
         if !matches!(self.ppu.current_mode(), PpuMode::PixelTransfer) {
           self.ppu.write_ram(address, value)
         }
       }
       // External RAM
-      EXTERNAL_RAM_START..EXTERNAL_RAM_END => self.cartridge.write_ram(address, value),
+      0xA000..0xC000 => self.cartridge.write_ram(address, value),
       // Work RAM
-      WORK_RAM_START..WORK_RAM_END => {
-        self.memory[(WORK_RAM_OFFSET + (address - WORK_RAM_START)) as usize] = value
-      }
+      0xC000..0xE000 => self.memory[(address - 0xC000) as usize] = value,
       // Echo RAM
-      ECHO_RAM_START..ECHO_RAM_END => {
-        self.memory[(WORK_RAM_OFFSET + (address - ECHO_RAM_START)) as usize] = value
-      }
+      0xE000..0xFE00 => self.memory[(address - 0xE000) as usize] = value,
       // OAM
-      OAM_START..OAM_END => {
+      0xFE00..0xFEA0 => {
         // Writing to OAM is undefined when in OAM and pixel transfer mode
         if !matches!(
           self.ppu.current_mode(),
@@ -144,13 +136,13 @@ impl Hardware {
         }
       }
       // Unused
-      UNUSED_START..UNUSED_END => {}
+      0xFEA0..0xFF00 => {}
       // I/O Registers
-      IO_REGISTER_START..IO_REGISTER_END => self.write_io_register(address, value),
+      0xFF00..0xFF80 => self.write_io_register(address, value),
       // High RAM
-      HIGH_RAM_START..HIGH_RAM_END => self.high_ram[(address - HIGH_RAM_START) as usize] = value,
+      0xFF80..0xFFFF => self.high_ram[(address - 0xFF80) as usize] = value,
       // Interrupt enable register
-      INTERRUPT_ENABLE_REGISTER => self.interrupts.set_enabled(value),
+      0xFFFF => self.interrupts.set_enabled(value),
     }
   }
 
@@ -199,94 +191,30 @@ impl Hardware {
 
   fn read_io_register(&self, address: u16) -> u8 {
     match address {
-      JOYPAD_REGISTER => self.joypad.read_register(),
-      TIMER_REGISTER_START..TIMER_REGISTER_END => self.timer.read_register(address),
-      PPU_REGISTER_START..PPU_REGISTER_END => self.ppu.read_register(address),
-      INTERRUPT_FLAG => self.interrupts.requested_bitfield(),
-      _ => todo!("Other registers"),
+      0xFF00 => self.joypad.read_register(),
+      0xFF04..0xFF08 => self.timer.read_register(address),
+      0xFF40..0xFF4B => self.ppu.read_register(address),
+      0xFF0F => self.interrupts.requested_bitfield(),
+      0xFF10..0xFF27 | 0xFF30..0xFF40 => todo!("audio is unimplemented"),
+      _ => unreachable!(),
     }
   }
 
   fn write_io_register(&mut self, address: u16, value: u8) {
     match address {
-      JOYPAD_REGISTER => self.joypad.write_register(value),
-      TIMER_REGISTER_START..TIMER_REGISTER_END => self.timer.write_register(address, value),
-      PPU_REGISTER_START..PPU_REGISTER_END => self.ppu.write_register(address, value),
-      INTERRUPT_FLAG => self.interrupts.set_requested(value),
-      _ => todo!("Other registers"),
+      0xFF00 => self.joypad.write_register(value),
+      0xFF04..0xFF08 => self.timer.write_register(address, value),
+      0xFF40..0xFF4B => self.ppu.write_register(address, value),
+      0xFF0F => self.interrupts.set_requested(value),
+      0xFF10..0xFF27 | 0xFF30..0xFF40 => todo!("audio is unimplemented"),
+      _ => unreachable!(),
     }
   }
 }
 
-/// The address of the joypad register.
-const JOYPAD_REGISTER: u16 = 0xFF00;
-/// The address of the interrupt flag.
-const INTERRUPT_FLAG: u16 = 0xFF0F;
-
-/// The starting address for ROM bank 0.
-const ROM_BANK_0_START: u16 = 0;
-/// The ending address for ROM bank 0.
-const ROM_BANK_0_END: u16 = 0x4000;
-/// The starting address for the switchable ROM bank.
-const ROM_BANK_N_START: u16 = 0x4000;
-/// The ending address  for the switchable ROM bank.
-const ROM_BANK_N_END: u16 = 0x8000;
-/// The starting address for VRAM.
-const VIDEO_RAM_START: u16 = 0x8000;
-/// The ending address  for VRAM.
-const VIDEO_RAM_END: u16 = 0xA000;
-/// The starting address for the cartridges RAM.
-const EXTERNAL_RAM_START: u16 = 0xA000;
-/// The ending address for the cartridges  RAM.
-const EXTERNAL_RAM_END: u16 = 0xC000;
-/// The starting address for work RAM.
-const WORK_RAM_START: u16 = 0xC000;
-/// The ending address for work  RAM.
-const WORK_RAM_END: u16 = 0xE000;
-/// The starting address for echo RAM.
-const ECHO_RAM_START: u16 = 0xE000;
-/// The ending address for echo RAM.
-const ECHO_RAM_END: u16 = 0xFE00;
-/// The starting address for the OAM (sprite attribute memory).
-const OAM_START: u16 = 0xFE00;
-/// The ending address for the OAM (sprite attribute memory).
-const OAM_END: u16 = 0xFEA0;
-/// The starting address for unused memory.
-const UNUSED_START: u16 = 0xFEA0;
-/// The ending address for unused memory.
-const UNUSED_END: u16 = 0xFF00;
-/// The starting address for I/O registers.
-const IO_REGISTER_START: u16 = 0xFF00;
-/// The ending address for I/O registers.
-const IO_REGISTER_END: u16 = 0xFF80;
-/// The starting address for HRAM.
-const HIGH_RAM_START: u16 = 0xFF80;
-/// The ending address for HRAM.
-const HIGH_RAM_END: u16 = 0xFFFF;
-/// The interrupt enable register.
-const INTERRUPT_ENABLE_REGISTER: u16 = 0xFFFF;
-
-/// The starting address of the timer register.
-const TIMER_REGISTER_START: u16 = 0xFF04;
-/// The ending address fo the timer register.
-const TIMER_REGISTER_END: u16 = 0xFF08;
-/// The starting address of the PPU register.
-const PPU_REGISTER_START: u16 = 0xFF40;
-/// The ending address of the PPU register.
-const PPU_REGISTER_END: u16 = 0xFF4B;
-
-const VIDEO_RAM_SIZE: u16 = VIDEO_RAM_END - VIDEO_RAM_START;
-const WORK_RAM_SIZE: u16 = WORK_RAM_END - WORK_RAM_START;
-const OAM_SIZE: u16 = OAM_END - OAM_START;
-const HIGH_RAM_SIZE: u16 = HIGH_RAM_END - HIGH_RAM_START;
-const INTERRUPT_ENABLE_REGISTER_SIZE: u16 = 1;
-
-const MEMORY_SIZE: u16 = WORK_RAM_SIZE + HIGH_RAM_SIZE;
-
-const VIDEO_RAM_OFFSET: u16 = 0;
-const WORK_RAM_OFFSET: u16 = VIDEO_RAM_OFFSET + VIDEO_RAM_SIZE;
-const OAM_OFFSET: u16 = WORK_RAM_OFFSET + WORK_RAM_SIZE;
-const HIGH_RAM_OFFSET: u16 = OAM_OFFSET + OAM_SIZE;
-const INTERRUPT_ENABLE_OFFSET: u16 = HIGH_RAM_OFFSET + HIGH_RAM_SIZE;
+/// The amount of working memory.
+const MEMORY_SIZE: u16 = 0x2000;
+/// The amount of fast, high memory.
+const HIGH_RAM_SIZE: u16 = 0x7F;
 
 const CARTRIDGE_TYPE: u16 = 0x147;

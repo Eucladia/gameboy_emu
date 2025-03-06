@@ -59,10 +59,10 @@ impl Timer {
   /// Reads from the Timer's registers.
   pub fn read_register(&self, address: u16) -> u8 {
     match address {
-      DIVIDER_REGISTER => self.div,
-      TIMER_COUNTER_REGISTER => self.tima,
-      TIMER_MODULO_REGISTER => self.tma,
-      TIMER_CONTROL_REGISTER => self.tac,
+      0xFF04 => self.div,
+      0xFF05 => self.tima,
+      0xFF06 => self.tma,
+      0xFF07 => self.tac,
       _ => unreachable!(),
     }
   }
@@ -71,21 +71,12 @@ impl Timer {
   pub fn write_register(&mut self, address: u16, value: u8) {
     match address {
       // Writing to DIV resets it
-      DIVIDER_REGISTER => self.div = 0,
-      TIMER_COUNTER_REGISTER => self.tima = value,
-      TIMER_MODULO_REGISTER => self.tma = value,
+      0xFF04 => self.div = 0,
+      0xFF05 => self.tima = value,
+      0xFF06 => self.tma = value,
       // Only the first 3 bits are used
-      TIMER_CONTROL_REGISTER => self.tac = value & 0x7,
+      0xFF07 => self.tac = value & 0x7,
       _ => unreachable!(),
     }
   }
 }
-
-/// The address of the divider register.
-const DIVIDER_REGISTER: u16 = 0xFF04;
-/// The address of the timer counter register.
-const TIMER_COUNTER_REGISTER: u16 = 0xFF05;
-/// The address of the timer modulo register.
-const TIMER_MODULO_REGISTER: u16 = 0xFF06;
-/// The address of the timer control register.
-const TIMER_CONTROL_REGISTER: u16 = 0xFF07;

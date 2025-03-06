@@ -82,8 +82,8 @@ impl Ppu {
     match self.current_mode() {
       // OAM scan lasts for 80 cycles
       PpuMode::OamScan => {
-        if self.counter >= OAM_CYCLE_COUNT {
-          self.counter -= OAM_CYCLE_COUNT;
+        if self.counter >= 80 {
+          self.counter -= 80;
           self.set_current_mode(PpuMode::PixelTransfer);
 
           if is_flag_set!(self.stat, StatFlag::OamInterrupt as u8) {
@@ -93,8 +93,8 @@ impl Ppu {
       }
       // Pixel transfer lasts for 172 cycles
       PpuMode::PixelTransfer => {
-        if self.counter >= PIXEL_TRANSFER_CYCLE_COUNT {
-          self.counter -= PIXEL_TRANSFER_CYCLE_COUNT;
+        if self.counter >= 127 {
+          self.counter -= 127;
           self.set_current_mode(PpuMode::HBlank);
           self.render_scanline();
 
@@ -105,8 +105,8 @@ impl Ppu {
       }
       // HBlank last for 204 cycles
       PpuMode::HBlank => {
-        if self.counter >= H_BLANK_CYCLE_COUNT {
-          self.counter -= H_BLANK_CYCLE_COUNT;
+        if self.counter >= 204 {
+          self.counter -= 204;
           self.ly += 1;
 
           if self.ly == self.lyc {
@@ -132,8 +132,8 @@ impl Ppu {
       }
       // VBlank last for 456 cycles
       PpuMode::VBlank => {
-        if self.counter >= V_BLANK_CYCLE_COUNT {
-          self.counter -= V_BLANK_CYCLE_COUNT;
+        if self.counter >= 456 {
+          self.counter -= 456;
           self.ly += 1;
 
           if self.ly == self.lyc {
@@ -560,11 +560,3 @@ impl TryFrom<u8> for PpuMode {
 const VIDEO_RAM_SIZE: u16 = 0x2000;
 /// The amount of memory availabkle for the sprites.
 const OAM_SIZE: u16 = 0xA0;
-/// The number of cycles it takes for OAM.
-const OAM_CYCLE_COUNT: usize = 80;
-/// The number of cycles it takes for a pixel transfer.
-const PIXEL_TRANSFER_CYCLE_COUNT: usize = 172;
-/// The number of cycles it takes for an HBlank.
-const H_BLANK_CYCLE_COUNT: usize = 204;
-/// The number of cycles it takes for a VBlank.
-const V_BLANK_CYCLE_COUNT: usize = 456;
