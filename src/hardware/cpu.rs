@@ -78,9 +78,12 @@ impl Cpu {
   pub fn fetch_instruction(&mut self, hardware: &Hardware) -> u8 {
     // If we have a DMA transfer and we're not in high ram,
     // then the next instruction byte being fetched is the current byte
-    // being transferred by the DMA transfer
+    // that is being transferred by the DMA controller
     let next_byte = match hardware.get_dma_transfer() {
       Some(DmaTransfer::Transferring { current_pos: index }) if self.registers.pc < 0xFF80 => {
+        // The program counter is still incremented in this case
+        self.registers.pc = self.registers.pc.wrapping_add(1);
+
         (*index as u16) << 8
       }
       _ => {
