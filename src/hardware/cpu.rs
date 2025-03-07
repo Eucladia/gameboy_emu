@@ -129,11 +129,12 @@ impl Cpu {
         self.clock.advance(2);
       }
       &LD(Operand::MemoryAddress(value), Operand::RegisterPair(RegisterPair::SP)) => {
-        hardware.write_byte(value, (self.registers.sp & 0xFF) as u8);
-        hardware.write_byte(
-          value.wrapping_add(1),
-          ((self.registers.sp >> 8) & 0xFF) as u8,
-        );
+        let lower = (self.registers.sp & 0xFF) as u8;
+        let upper = ((self.registers.sp >> 8) & 0xFF) as u8;
+
+        hardware.write_byte(value, lower);
+        hardware.write_byte(value.wrapping_add(1), upper);
+
         self.clock.advance(5);
       }
       &LD(Operand::Register(dest), Operand::Byte(value)) => {
@@ -146,7 +147,7 @@ impl Cpu {
         }
       }
       &LD(Operand::RegisterPair(RegisterPair::HL), Operand::StackOffset(offset)) => {
-        // NOTE: The offset can be negative, so do a sign-extend add.
+        // The offset can be negative, so do a sign-extend add.
         self.registers.sp = self.registers.sp.wrapping_add(offset as i8 as u16);
         self.clock.advance(3);
       }
@@ -616,11 +617,7 @@ impl Cpu {
         let should_jump = self.is_conditional_flag_set(flag);
 
         if should_jump {
-          let upper = ((self.registers.pc >> 8) & 0xFF) as u8;
-          let lower = (self.registers.pc & 0xFF) as u8;
-
-          hardware.write_byte(self.registers.sp.wrapping_sub(1), upper);
-          hardware.write_byte(self.registers.sp.wrapping_sub(2), lower);
+          self.write_stack_word(hardware, self.registers.pc);
 
           self.registers.pc = address;
           self.registers.sp = self.registers.sp.wrapping_sub(2);
@@ -630,11 +627,7 @@ impl Cpu {
         }
       }
       &CALL(None, Operand::Word(address)) => {
-        let upper = ((self.registers.pc >> 8) & 0xFF) as u8;
-        let lower = (self.registers.pc & 0xFF) as u8;
-
-        hardware.write_byte(self.registers.sp.wrapping_sub(1), upper);
-        hardware.write_byte(self.registers.sp.wrapping_sub(2), lower);
+        self.write_stack_word(hardware, self.registers.pc);
 
         self.registers.pc = address;
         self.registers.sp = self.registers.sp.wrapping_sub(2);
@@ -672,7 +665,7 @@ impl Cpu {
         }
       }
       &JR(None, Operand::Byte(offset)) => {
-        // NOTE: The byte can be negative, so sign-extend add the value
+        // The byte can be negative, so sign-extend add the value
         self.registers.pc = self.registers.pc.wrapping_add(offset as i8 as u16);
         self.clock.advance(3);
       }
@@ -680,10 +673,9 @@ impl Cpu {
         let should_jump = self.is_conditional_flag_set(flag);
 
         if should_jump {
-          let lower = hardware.read_byte(self.registers.sp);
-          let upper = hardware.read_byte(self.registers.sp.wrapping_add(1));
+          let addr = self.read_stack_word(hardware);
 
-          self.registers.pc = ((upper as u16) << 8) | lower as u16;
+          self.registers.pc = addr;
           self.registers.sp = self.registers.sp.wrapping_add(2);
           self.clock.advance(5);
         } else {
@@ -691,28 +683,22 @@ impl Cpu {
         }
       }
       RET(None) => {
-        let lower = hardware.read_byte(self.registers.sp);
-        let upper = hardware.read_byte(self.registers.sp.wrapping_add(1));
+        let addr = self.read_stack_word(hardware);
 
-        self.registers.pc = ((upper as u16) << 8) | lower as u16;
+        self.registers.pc = addr;
         self.registers.sp = self.registers.sp.wrapping_add(2);
         self.clock.advance(4);
       }
       RETI => {
-        let lower = hardware.read_byte(self.registers.sp);
-        let upper = hardware.read_byte(self.registers.sp.wrapping_add(1));
+        let addr = self.read_stack_word(hardware);
 
-        self.registers.pc = ((upper as u16) << 8) | lower as u16;
+        self.registers.pc = addr;
         self.registers.sp = self.registers.sp.wrapping_add(2);
         self.master_interrupt_enabled = true;
         self.clock.advance(4);
       }
       &RST(Operand::Byte(target)) => {
-        let upper = ((self.registers.pc >> 8) & 0xFF) as u8;
-        let lower = (self.registers.pc & 0xFF) as u8;
-
-        hardware.write_byte(self.registers.sp.wrapping_sub(1), upper);
-        hardware.write_byte(self.registers.sp.wrapping_sub(2), lower);
+        self.write_stack_word(hardware, self.registers.pc);
 
         self.registers.h = 0;
         self.registers.l = target;
@@ -750,9 +736,7 @@ impl Cpu {
       }
 
       &POP(Operand::RegisterPair(rp)) => {
-        let lower = hardware.read_byte(self.registers.sp);
-        let upper = hardware.read_byte(self.registers.sp.wrapping_add(1));
-        let value = ((upper as u16) << 8) | lower as u16;
+        let value = self.read_stack_word(hardware);
 
         self.write_register_pair(rp, value);
 
@@ -761,11 +745,8 @@ impl Cpu {
       }
       &PUSH(Operand::RegisterPair(rp)) => {
         let reg_value = self.read_register_pair(rp);
-        let upper = ((reg_value >> 8) & 0xFF) as u8;
-        let lower = (reg_value & 0xFF) as u8;
 
-        hardware.write_byte(self.registers.sp.wrapping_sub(1), upper);
-        hardware.write_byte(self.registers.sp.wrapping_sub(2), lower);
+        self.write_stack_word(hardware, reg_value);
 
         self.registers.sp = self.registers.sp.wrapping_sub(2);
         self.clock.advance(4);
@@ -1568,6 +1549,23 @@ impl Cpu {
         self.registers.sp = value;
       }
     }
+  }
+
+  /// Reads 16-bits of memory from the stack.
+  fn read_stack_word(&self, hardware: &Hardware) -> u16 {
+    let lower = hardware.read_byte(self.registers.sp);
+    let upper = hardware.read_byte(self.registers.sp.wrapping_add(1));
+
+    ((upper as u16) << 8) | lower as u16
+  }
+
+  /// Writes the 16-bit value to the stack.
+  fn write_stack_word(&self, hardware: &mut Hardware, value: u16) {
+    let upper = ((value >> 8) & 0xFF) as u8;
+    let lower = (value & 0xFF) as u8;
+
+    hardware.write_byte(self.registers.sp.wrapping_sub(1), upper);
+    hardware.write_byte(self.registers.sp.wrapping_sub(2), lower);
   }
 
   /// Returns whether the following [`ConditionalFlag`] is set.
