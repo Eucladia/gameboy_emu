@@ -1,3 +1,5 @@
+use crate::flags::{add_flag, is_flag_set, remove_flag};
+
 /// A kind of interrupt.
 #[derive(Debug, Copy, Clone)]
 #[repr(u8)]
@@ -12,11 +14,14 @@ pub enum Interrupt {
 /// Stores the currently enabled interrupts and currently set interrupts.
 #[derive(Debug, Clone)]
 pub struct Interrupts {
+  /// The currently requested interrupts.
   requested: u8,
+  /// The currently enabled interrupts.
   enabled: u8,
 }
 
 impl Interrupts {
+  /// Creates a new [`Interrupts`], with no enabled or requested interrupts.
   pub const fn new() -> Self {
     Self {
       requested: 0,
@@ -26,17 +31,17 @@ impl Interrupts {
 
   /// Enables the [`Interrupt`].
   pub fn enable_interrupt(&mut self, interrupt: Interrupt) {
-    self.enabled |= interrupt as u8;
+    self.enabled = add_flag!(self.enabled, interrupt as u8);
   }
 
   /// Disables the [`Interrupt`].
   pub fn disable_interrupt(&mut self, interrupt: Interrupt) {
-    self.enabled &= !(interrupt as u8);
+    self.enabled = remove_flag!(self.enabled, interrupt as u8);
   }
 
   /// Checks if the [`Interrupt`] is enabled.
   pub fn is_enabled(&mut self, interrupt: Interrupt) -> bool {
-    (self.enabled & interrupt as u8) == interrupt as u8
+    is_flag_set!(self.enabled, interrupt as u8)
   }
 
   /// Sets the internal enabled interrupts to the following value.
@@ -52,26 +57,27 @@ impl Interrupts {
 
   /// Checks if the following [`Interrupt`] was requested.
   pub fn was_requested(&mut self, interrupt: Interrupt) -> bool {
-    (self.requested & interrupt as u8) == interrupt as u8
+    is_flag_set!(self.requested, interrupt as u8)
   }
 
   /// Requests the following [`Interrupt`].
   pub fn request_interrupt(&mut self, interrupt: Interrupt) {
-    self.requested |= interrupt as u8;
+    self.requested = add_flag!(self.requested, interrupt as u8);
   }
 
   /// Updates the requested interrupts to the following value.
   pub fn set_requested(&mut self, value: u8) {
-    self.requested |= value & 0b1_1111;
+    self.requested = add_flag!(self.requested, value & 0b1_1111);
   }
 
   /// Clears a requested [`Interrupt`].
   pub fn clear_interrupt(&mut self, interrupt: Interrupt) {
-    self.requested &= !(interrupt as u8);
+    self.requested = remove_flag!(self.requested, interrupt as u8);
   }
 
   /// Returns a bitfield of the requested interrupts.
   pub fn requested_bitfield(&self) -> u8 {
+    // Only the first 5 bits have flags
     self.requested & 0b1_1111
   }
 }
