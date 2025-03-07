@@ -186,6 +186,11 @@ impl Hardware {
     }
   }
 
+  /// Checks if there are any pending interrupts.
+  pub fn has_pending_interrupts(&self) -> bool {
+    (self.interrupts.enabled_bitfield() & self.interrupts.requested_bitfield()) != 0
+  }
+
   /// Gets the active DMA transfer.
   pub fn get_dma_transfer(&self) -> Option<&DmaTransfer> {
     self.ppu.dma_transfer.as_ref()

@@ -27,6 +27,8 @@ pub struct Cpu {
   registers: Registers,
   /// The state of the CPU.
   state: CpuState,
+  /// Whether the CPU is in a bugged halted state.
+  halt_bug: bool,
   /// Master interrupt flag.
   master_interrupt_enabled: bool,
 }
@@ -40,6 +42,7 @@ impl Cpu {
       state: CpuState::Running,
       clock: ClockState::default(),
       registers: Registers::default(),
+      halt_bug: false,
     }
   }
 
@@ -48,7 +51,6 @@ impl Cpu {
     let prev_opcode = self.registers.ir;
     let instruction_byte = self.fetch_instruction(hardware);
 
-    self.registers.pc = self.registers.pc.wrapping_add(1);
     self.registers.ir = instruction_byte;
 
     let instruction = self.decode_instruction(instruction_byte, hardware);
@@ -63,7 +65,8 @@ impl Cpu {
 
     let cycles_taken = self.clock.t_cycles.wrapping_sub(before);
 
-    // The `EI` instruction has a delay of 4 T-cycles
+    // The `EI` instruction has a delay of 4 T-cycles, so enable the master
+    // interrupt AFTER the execution of the next instruction
     if prev_opcode == 0xFB {
       self.master_interrupt_enabled = true;
     }
@@ -72,7 +75,7 @@ impl Cpu {
   }
 
   /// Fetches the next instruction byte.
-  pub fn fetch_instruction(&self, hardware: &Hardware) -> u8 {
+  pub fn fetch_instruction(&mut self, hardware: &Hardware) -> u8 {
     // If we have a DMA transfer and we're not in high ram,
     // then the next instruction byte being fetched is the current byte
     // being transferred by the DMA transfer
@@ -80,7 +83,19 @@ impl Cpu {
       Some(DmaTransfer::Transferring { current_pos: index }) if self.registers.pc < 0xFF80 => {
         (*index as u16) << 8
       }
-      _ => self.registers.pc,
+      _ => {
+        let current_pc = self.registers.pc;
+
+        // If we're in a halted bug state, then we shouldn't increment the
+        // program counter
+        if self.halt_bug {
+          self.halt_bug = false;
+        } else {
+          self.registers.pc = self.registers.pc.wrapping_add(1);
+        }
+
+        current_pc
+      }
     };
 
     hardware.read_byte(next_byte)
@@ -709,7 +724,25 @@ impl Cpu {
         self.clock.tick();
       }
       HALT => {
-        self.state = CpuState::Halted;
+        // The Gameboy has a hardware bug when executing the `HALT` instruction.
+        //
+        // That is, when the master interrupt flag isn't enabled and the program
+        // tries to halt while there is an interrupt pending, it will fail to
+        // halt and enter a bugged state.
+        //
+        // In this bugged state, the program counter is NOT incremented after
+        // fetching the next byte.
+        //
+        // See https://gbdev.io/pandocs/halt.html for more.
+        if !self.master_interrupt_enabled && hardware.has_pending_interrupts() {
+          self.halt_bug = true;
+          // The CPU doesn't actually enter a halted state in the case of a bugged
+          // halt instruction.
+          self.state = CpuState::Running;
+        } else {
+          self.state = CpuState::Halted;
+        }
+
         self.clock.tick();
       }
       NOP => {
@@ -757,7 +790,8 @@ impl Cpu {
         self.clock.tick();
       }
       EI => {
-        self.master_interrupt_enabled = true;
+        // We shouldn't actually update the master interrupt flag immediately
+        // because this instruction seems to have a delay of 4 T-cycles
         self.clock.tick();
       }
       SCF => {
