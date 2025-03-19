@@ -27,7 +27,7 @@ pub struct Cpu {
   /// The clock state.
   clock: ClockState,
   /// The registers.
-  registers: Registers,
+  pub registers: Registers,
   /// The state of the CPU.
   state: CpuState,
   /// Whether the CPU is in a bugged halted state.
