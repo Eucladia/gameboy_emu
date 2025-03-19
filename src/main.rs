@@ -156,8 +156,12 @@ fn main() {
 
             let game_buffer = emulator.hardware.frame_buffer();
 
-            // Pre-fill the buffer with green
+            #[cfg(debug_assertions)]
+            // Pre-fill the buffer with green in debug mode
             window_frame.fill(0x0000FF00);
+            #[cfg(not(debug_assertions))]
+            // Pre-fill the buffer with black in release builds
+            window_frame.fill(0x00000000);
 
             // TODO: I feel like this could be better written
             for y in 0..height {
