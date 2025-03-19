@@ -77,8 +77,13 @@ impl RegisterPair {
       0b00 => RegisterPair::BC,
       0b01 => RegisterPair::DE,
       0b10 => RegisterPair::HL,
-      0b11 if use_psw => RegisterPair::AF,
-      0b11 => RegisterPair::SP,
+      0b11 => {
+        if use_psw {
+          RegisterPair::AF
+        } else {
+          RegisterPair::SP
+        }
+      }
       _ => return None,
     })
   }

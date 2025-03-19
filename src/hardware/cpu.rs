@@ -1,9 +1,12 @@
 use crate::{
   flags::{ConditionalFlag, Flag, add_flag, is_flag_set, remove_flag},
-  hardware::Hardware,
-  hardware::ppu::DmaTransfer,
-  hardware::registers::{Register, RegisterPair, Registers},
+  hardware::{
+    Hardware,
+    ppu::DmaTransfer,
+    registers::{Register, RegisterPair, Registers},
+  },
   instructions::{Instruction, Operand},
+  interrupts::Interrupt,
 };
 
 /// A state that the CPU can be in.
@@ -34,7 +37,7 @@ pub struct Cpu {
 }
 
 impl Cpu {
-  /// Creates a new [`CPU`] in a running state.
+  /// Creates a new [`Cpu`] in a running state.
   pub fn new() -> Self {
     Self {
       flags: 0,
@@ -44,6 +47,15 @@ impl Cpu {
       registers: Registers::default(),
       halt_bug: false,
     }
+  }
+
+  /// Creates a new [`Cpu`] with the default register values set.
+  pub fn with_register_defaults() -> Self {
+    let mut cpu = Self::new();
+
+    cpu.set_register_defaults();
+
+    cpu
   }
 
   /// Executes one cycle, returning the number of T-cycles taken.
@@ -76,9 +88,8 @@ impl Cpu {
 
   /// Fetches the next instruction byte.
   pub fn fetch_instruction(&mut self, hardware: &Hardware) -> u8 {
-    // If we have a DMA transfer and we're not in high ram,
-    // then the next instruction byte being fetched is the current byte
-    // that is being transferred by the DMA controller
+    // If we have a DMA transfer and we're not in high ram, then the next instruction
+    // byte being fetched is the current byte that is being transferred by the DMA controller
     let next_byte = match hardware.get_dma_transfer() {
       Some(DmaTransfer::Transferring { current_pos: index }) if self.registers.pc < 0xFF80 => {
         // The program counter is still incremented in this case
@@ -89,8 +100,7 @@ impl Cpu {
       _ => {
         let current_pc = self.registers.pc;
 
-        // If we're in a halted bug state, then we shouldn't increment the
-        // program counter
+        // Don't increment the program counter when we're in a bugged halted state
         if self.halt_bug {
           self.halt_bug = false;
         } else {
@@ -133,7 +143,7 @@ impl Cpu {
       }
       &LD(Operand::MemoryAddress(value), Operand::RegisterPair(RegisterPair::SP)) => {
         let lower = (self.registers.sp & 0xFF) as u8;
-        let upper = ((self.registers.sp >> 8) & 0xFF) as u8;
+        let upper = ((self.registers.sp & 0xFF00) >> 8) as u8;
 
         hardware.write_byte(value, lower);
         hardware.write_byte(value.wrapping_add(1), upper);
@@ -151,7 +161,18 @@ impl Cpu {
       }
       &LD(Operand::RegisterPair(RegisterPair::HL), Operand::StackOffset(offset)) => {
         // The offset can be negative, so do a sign-extend add.
-        self.registers.sp = self.registers.sp.wrapping_add(offset as i8 as u16);
+        let offset = offset as i8 as u16;
+        let sp = self.registers.sp;
+        let result = sp.wrapping_add(offset);
+
+        self.registers.h = ((result & 0xFF00) >> 8) as u8;
+        self.registers.l = (result & 0xFF) as u8;
+
+        self.toggle_flag(Flag::Z, false);
+        self.toggle_flag(Flag::N, false);
+        self.toggle_flag(Flag::H, (sp & 0x0F) as u8 + ((offset as u8) & 0x0F) > 0x0F);
+        self.toggle_flag(Flag::C, ((sp & 0xFF) + (offset & 0xFF) as u16) > 0xFF);
+
         self.clock.advance(3);
       }
       LD(Operand::RegisterPair(RegisterPair::SP), Operand::RegisterPair(RegisterPair::HL)) => {
@@ -235,11 +256,10 @@ impl Cpu {
       }
 
       &ADC(Operand::Register(Register::A), Operand::Register(src)) => {
+        let a_value = self.registers.a;
         let is_carry_set = is_flag_set!(self.flags, Flag::C as u8);
         let reg_value = self.read_register(hardware, src);
-        let res = self
-          .registers
-          .a
+        let res = a_value
           .wrapping_add(reg_value)
           .wrapping_add(is_carry_set as u8);
 
@@ -249,11 +269,11 @@ impl Cpu {
         self.toggle_flag(Flag::N, false);
         self.toggle_flag(
           Flag::H,
-          (res & 0x0F) + (reg_value & 0x0F) + (is_carry_set as u8 & 0x0F) > 0x0F,
+          (a_value & 0x0F) + (reg_value & 0x0F) + (is_carry_set as u8 & 0x0F) > 0x0F,
         );
         self.toggle_flag(
           Flag::C,
-          (res as u16 + reg_value as u16 + is_carry_set as u16) > u8::MAX as u16,
+          (a_value as u16 + reg_value as u16 + is_carry_set as u16) > 0xFF,
         );
 
         self.clock.tick();
@@ -264,12 +284,9 @@ impl Cpu {
         }
       }
       &ADC(Operand::Register(Register::A), Operand::Byte(byte)) => {
+        let a_value = self.registers.a;
         let is_carry_set = is_flag_set!(self.flags, Flag::C as u8);
-        let res = self
-          .registers
-          .a
-          .wrapping_add(byte)
-          .wrapping_add(is_carry_set as u8);
+        let res = a_value.wrapping_add(byte).wrapping_add(is_carry_set as u8);
 
         self.registers.a = res;
 
@@ -277,25 +294,26 @@ impl Cpu {
         self.toggle_flag(Flag::N, false);
         self.toggle_flag(
           Flag::H,
-          (res & 0x0F) + (byte & 0x0F) + (is_carry_set as u8 & 0x0F) > 0x0F,
+          (a_value & 0x0F) + (byte & 0x0F) + (is_carry_set as u8 & 0x0F) > 0x0F,
         );
         self.toggle_flag(
           Flag::C,
-          (res as u16 + byte as u16 + is_carry_set as u16) > u8::MAX as u16,
+          (a_value as u16 + byte as u16 + is_carry_set as u16) > 0xFF,
         );
 
         self.clock.advance(2);
       }
       &ADD(Operand::Register(Register::A), Operand::Register(src)) => {
+        let a_value = self.registers.a;
         let reg_value = self.read_register(hardware, src);
-        let res = self.registers.a.wrapping_add(reg_value);
+        let res = a_value.wrapping_add(reg_value);
 
         self.registers.a = res;
 
         self.toggle_flag(Flag::Z, res == 0);
         self.toggle_flag(Flag::N, false);
-        self.toggle_flag(Flag::H, (res & 0x0F) + (reg_value & 0x0F) > 0x0F);
-        self.toggle_flag(Flag::C, (res as u16 + reg_value as u16) > u8::MAX as u16);
+        self.toggle_flag(Flag::H, (a_value & 0x0F) + (reg_value & 0x0F) > 0x0F);
+        self.toggle_flag(Flag::C, (a_value as u16 + reg_value as u16) > 0xFF);
 
         self.clock.tick();
 
@@ -305,14 +323,15 @@ impl Cpu {
         }
       }
       &ADD(Operand::Register(Register::A), Operand::Byte(byte)) => {
-        let res = self.registers.a.wrapping_add(byte);
+        let a_value = self.registers.a;
+        let res = a_value.wrapping_add(byte);
 
         self.registers.a = res;
 
         self.toggle_flag(Flag::Z, res == 0);
         self.toggle_flag(Flag::N, false);
-        self.toggle_flag(Flag::H, (res & 0x0F) + (byte & 0x0F) > 0x0F);
-        self.toggle_flag(Flag::C, (res as u16 + byte as u16) > u8::MAX as u16);
+        self.toggle_flag(Flag::H, (a_value & 0x0F) + (byte & 0x0F) > 0x0F);
+        self.toggle_flag(Flag::C, (a_value as u16 + byte as u16) > 0xFF);
 
         self.clock.advance(2);
       }
@@ -408,7 +427,7 @@ impl Cpu {
 
         self.toggle_flag(Flag::Z, res == 0);
         self.toggle_flag(Flag::N, true);
-        self.toggle_flag(Flag::H, (reg_value & 0x0F) == 0x0);
+        self.toggle_flag(Flag::H, (reg_value & 0x0F) < 1);
 
         self.clock.tick();
 
@@ -596,7 +615,7 @@ impl Cpu {
         }
 
         // Check the upper nibble
-        if carried || (!subtracted && (self.registers.a >> 4) > 0x09) {
+        if carried || (!subtracted && self.registers.a > 0x99) {
           correction |= 0x60;
           carried = true;
         }
@@ -703,9 +722,8 @@ impl Cpu {
       &RST(Operand::Byte(target)) => {
         self.write_stack_word(hardware, self.registers.pc);
 
-        self.registers.h = 0;
-        self.registers.l = target;
         self.registers.sp = self.registers.sp.wrapping_sub(2);
+        self.registers.pc = target as u16;
         self.clock.advance(4);
       }
       STOP(Operand::Byte(_)) => {
@@ -744,7 +762,7 @@ impl Cpu {
         self.write_register_pair(rp, value);
 
         self.registers.sp = self.registers.sp.wrapping_add(2);
-        self.clock.advance(4);
+        self.clock.advance(3);
       }
       &PUSH(Operand::RegisterPair(rp)) => {
         let reg_value = self.read_register_pair(rp);
@@ -1325,12 +1343,12 @@ impl Cpu {
       }
       // JP HL
       0xE9 => Instruction::JP(None, Operand::RegisterPair(RegisterPair::HL)),
-      // JR cf, n16
+      // JR cf, n8
       0x20 | 0x30 | 0x28 | 0x38 => {
         let cond_flag = ConditionalFlag::from_bits((byte >> 3) & 0x3).unwrap();
-        let n16 = hardware.read_word(self.registers.pc);
+        let n8 = hardware.read_byte(self.registers.pc);
 
-        Instruction::JR(Some(Operand::Conditional(cond_flag)), Operand::Word(n16))
+        Instruction::JR(Some(Operand::Conditional(cond_flag)), Operand::Byte(n8))
       }
       // JR n8
       0x18 => {
@@ -1478,8 +1496,111 @@ impl Cpu {
       }
 
       // Unused opcodes
-      0xD3 | 0xE3 | 0xE4 | 0xF4 | 0xDB | 0xEB | 0xEC | 0xFC | 0xDD | 0xED | 0xFD => unreachable!(),
+      0xD3 | 0xE3 | 0xE4 | 0xF4 | 0xDB | 0xEB | 0xEC | 0xFC | 0xDD | 0xED | 0xFD => {
+        // NOTE: Is mapping to a `NOP` correct? Supposedly unknown opcodes hang the CPU?
+        Instruction::NOP
+      }
     }
+  }
+
+  /// Handles any of the currently requested interrupts.
+  pub fn handle_interrupts(&mut self, hardware: &mut Hardware) {
+    // Interrupts with a smaller bit value have higher priority.
+    //
+    // The master interrupt is disabled before calling the handler of the interrupt.
+    //
+    // See https://gbdev.io/pandocs/Interrupts.html for more.
+    if hardware.is_interrupt_requested(Interrupt::VBlank) {
+      self.state = CpuState::Running;
+
+      if self.master_interrupt_enabled {
+        self.master_interrupt_enabled = false;
+
+        hardware.clear_interrupt(Interrupt::VBlank);
+
+        self.write_stack_word(hardware, self.registers.pc);
+        self.registers.sp = self.registers.sp.wrapping_sub(2);
+
+        self.registers.pc = 0x40;
+      }
+    } else if hardware.is_interrupt_requested(Interrupt::Lcd) {
+      self.state = CpuState::Running;
+
+      if self.master_interrupt_enabled {
+        self.master_interrupt_enabled = false;
+
+        hardware.clear_interrupt(Interrupt::Lcd);
+
+        self.write_stack_word(hardware, self.registers.pc);
+        self.registers.sp = self.registers.sp.wrapping_sub(2);
+
+        self.registers.pc = 0x48;
+      }
+    } else if hardware.is_interrupt_requested(Interrupt::Timer) {
+      self.state = CpuState::Running;
+
+      if self.master_interrupt_enabled {
+        self.master_interrupt_enabled = false;
+
+        hardware.clear_interrupt(Interrupt::Timer);
+
+        self.write_stack_word(hardware, self.registers.pc);
+        self.registers.sp = self.registers.sp.wrapping_sub(2);
+
+        self.registers.pc = 0x50;
+      }
+    } else if hardware.is_interrupt_requested(Interrupt::Serial) {
+      self.state = CpuState::Running;
+
+      if self.master_interrupt_enabled {
+        self.master_interrupt_enabled = false;
+
+        hardware.clear_interrupt(Interrupt::Serial);
+
+        self.write_stack_word(hardware, self.registers.pc);
+        self.registers.sp = self.registers.sp.wrapping_sub(2);
+
+        self.registers.pc = 0x58;
+      }
+    } else if hardware.is_interrupt_requested(Interrupt::Joypad) {
+      self.state = CpuState::Running;
+
+      if self.master_interrupt_enabled {
+        self.master_interrupt_enabled = false;
+
+        hardware.clear_interrupt(Interrupt::Joypad);
+
+        self.write_stack_word(hardware, self.registers.pc);
+        self.registers.sp = self.registers.sp.wrapping_sub(2);
+
+        self.registers.pc = 0x60;
+      }
+    }
+  }
+
+  /// Sets the default register values.
+  pub fn set_register_defaults(&mut self) {
+    // These values were taken from "The Cycle-Accurate Game Boy Docs"
+    self.registers.a = 0x01;
+    self.flags = 0xB0;
+
+    self.registers.b = 0x00;
+    self.registers.c = 0x13;
+
+    self.registers.d = 0x00;
+    self.registers.e = 0xD8;
+
+    self.registers.h = 0x01;
+    self.registers.l = 0x4D;
+
+    self.registers.sp = 0xFFFE;
+
+    self.registers.pc = 0x100;
+  }
+
+  /// The state of the CPU.
+  pub fn state(&self) -> CpuState {
+    self.state
   }
 
   /// Reads the value of the [`Register`].
@@ -1504,12 +1625,12 @@ impl Cpu {
   fn write_register(&mut self, hardware: &mut Hardware, register: Register, value: u8) {
     match register {
       Register::A => self.registers.a = value,
-      Register::B => self.registers.a = value,
-      Register::C => self.registers.a = value,
-      Register::D => self.registers.a = value,
-      Register::E => self.registers.a = value,
-      Register::H => self.registers.a = value,
-      Register::L => self.registers.a = value,
+      Register::B => self.registers.b = value,
+      Register::C => self.registers.c = value,
+      Register::D => self.registers.d = value,
+      Register::E => self.registers.e = value,
+      Register::H => self.registers.h = value,
+      Register::L => self.registers.l = value,
       Register::M => {
         let address = (self.registers.h as u16) << 8 | self.registers.l as u16;
 
@@ -1534,7 +1655,7 @@ impl Cpu {
     match register_pair {
       RegisterPair::AF => {
         self.registers.a = ((value >> 8) & 0xFF) as u8;
-        self.flags = (value & 0xFF) as u8;
+        self.flags = (value & 0xF0) as u8;
       }
       RegisterPair::BC => {
         self.registers.b = ((value >> 8) & 0xFF) as u8;
@@ -1554,7 +1675,7 @@ impl Cpu {
     }
   }
 
-  /// Reads 16-bits of memory from the stack.
+  /// Reads 16-bits of memory from the stack, without modifying the SP.
   fn read_stack_word(&self, hardware: &Hardware) -> u16 {
     let lower = hardware.read_byte(self.registers.sp);
     let upper = hardware.read_byte(self.registers.sp.wrapping_add(1));
@@ -1562,7 +1683,7 @@ impl Cpu {
     ((upper as u16) << 8) | lower as u16
   }
 
-  /// Writes the 16-bit value to the stack.
+  /// Writes the 16-bit value to the stack, without modifying the SP.
   fn write_stack_word(&self, hardware: &mut Hardware, value: u16) {
     let upper = ((value >> 8) & 0xFF) as u8;
     let lower = (value & 0xFF) as u8;

@@ -38,7 +38,7 @@ impl Joypad {
   /// Creates a new [`Joypad`] in an unreleased state.
   pub const fn new() -> Self {
     Self {
-      // Mark all buttons as released, because a value of 0 means its pressed
+      // Mark all buttons as released
       pressed: 0xFF,
       // Mark the groups as unselected
       button_group: 0xF0,
@@ -57,25 +57,31 @@ impl Joypad {
     };
 
     // The upper 2 bits are always set
-    0xC0 | self.button_group | lower_nibble
+    0b1100_000 | self.button_group | lower_nibble
   }
 
   /// Updates the [`Joypad`] button group.
   pub fn write_register(&mut self, value: u8) {
     // Only bits 4 and 5 are writeable
-    self.button_group = value & 0x30;
+    self.button_group = value & 0b11_0000;
   }
 
   /// Updates the button's state, requesting an interrupt if a button was pressed or released.
-  pub fn update_state(&mut self, interrupts: &mut Interrupts, button: Button, pressed: bool) {
+  // TODO: Rename
+  pub fn update_button_state(
+    &mut self,
+    interrupts: &mut Interrupts,
+    button: Button,
+    pressed: bool,
+  ) {
     let before = self.pressed;
     let mask = button as u8;
 
     // A button is pressed if its bit is set to 0
     if pressed {
-      self.pressed = remove_flag!(self.pressed, button as u8);
+      self.pressed = remove_flag!(self.pressed, mask);
     } else {
-      self.pressed = add_flag!(self.pressed, button as u8);
+      self.pressed = add_flag!(self.pressed, mask);
     }
 
     if self.pressed != before {

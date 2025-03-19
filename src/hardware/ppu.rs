@@ -23,7 +23,9 @@ pub struct Ppu {
   scx: u8,
   /// LCDC Y-Coordinate aka the current scanline.
   ly: u8,
-  /// The window's scanline. See https://gbdev.io/pandocs/Tile_Maps.html#window.
+  /// The window's scanline.
+  ///
+  /// See https://gbdev.io/pandocs/Tile_Maps.html#window for more.
   window_line: u8,
   /// LY Compare.
   lyc: u8,
@@ -51,8 +53,8 @@ impl Ppu {
   /// Creates a new [`Ppu`].
   pub fn new() -> Self {
     Self {
-      lcdc: 0,
-      // The default mode is the OAM being used
+      lcdc: 0x0,
+      // The default mode is the OAM search
       stat: PpuMode::OamScan as u8,
       scy: 0,
       scx: 0,
@@ -94,8 +96,8 @@ impl Ppu {
       }
       // Pixel transfer lasts for 172 cycles
       PpuMode::PixelTransfer => {
-        if self.counter >= 127 {
-          self.counter -= 127;
+        if self.counter >= 172 {
+          self.counter -= 172;
           self.set_current_mode(PpuMode::HBlank);
           self.render_scanline();
 
@@ -108,7 +110,7 @@ impl Ppu {
       PpuMode::HBlank => {
         if self.counter >= 204 {
           self.counter -= 204;
-          self.ly += 1;
+          self.ly = self.ly.wrapping_add(1);
 
           if self.ly == self.lyc {
             self.stat = add_flag!(self.stat, StatFlag::Coincidence as u8);
@@ -123,9 +125,8 @@ impl Ppu {
           if self.ly == 144 {
             self.set_current_mode(PpuMode::VBlank);
 
-            if is_flag_set!(self.stat, StatFlag::VBlankInterrupt as u8) {
-              interrupts.request_interrupt(Interrupt::VBlank);
-            }
+            // VBlanks are always fired when entering VBlank mode
+            interrupts.request_interrupt(Interrupt::VBlank);
           } else {
             self.set_current_mode(PpuMode::OamScan);
           }
@@ -135,7 +136,7 @@ impl Ppu {
       PpuMode::VBlank => {
         if self.counter >= 456 {
           self.counter -= 456;
-          self.ly += 1;
+          self.ly = self.ly.wrapping_add(1);
 
           if self.ly == self.lyc {
             self.stat = add_flag!(self.stat, StatFlag::Coincidence as u8);
@@ -231,9 +232,19 @@ impl Ppu {
     PpuMode::try_from(self.stat & 0x03).unwrap()
   }
 
+  /// Returns whether the LCD is enabled.
+  pub fn display_enabled(&self) -> bool {
+    is_flag_set!(self.lcdc, LcdControl::LcdDisplay as u8)
+  }
+
+  /// Gets the frame buffer.
+  pub fn buffer(&self) -> &[[u8; 160]; 144] {
+    &self.buffer
+  }
+
   /// Sets the mode of the PPU.
   fn set_current_mode(&mut self, mode: PpuMode) {
-    // The 7th bit is unused the the lower 2 bits store the mode
+    // The 7th bit is unused and the lower 2 bits store the mode
     self.stat = (self.stat & 0b0111_1100) | mode as u8;
   }
 
@@ -252,7 +263,7 @@ impl Ppu {
       if tile_index < 128 {
         (0x9000, tile_index)
       } else {
-        (0x8800, (tile_index - 128))
+        (0x8800, tile_index - 128)
       }
     };
 
@@ -316,11 +327,11 @@ impl Ppu {
 
     let y = (self.ly as u16).wrapping_add(self.scy as u16);
     // Background tile map have 32 tiles per row
-    let tile_row = (y / 8) * 32;
+    let tile_row = (y / 8) % 32 * 32;
 
     for (x, pixel) in scanline.iter_mut().enumerate() {
       let x_pos = (x as u16).wrapping_add(self.scx as u16);
-      let tile_col = x_pos / 8;
+      let tile_col = (x_pos / 8) % 32;
       let tile_index = self.read_ram(bg_tile_map + tile_row + tile_col);
 
       *pixel = self.get_tile_pixel(tile_index, (y % 8) as u8, (x_pos % 8) as u8);
@@ -453,7 +464,7 @@ impl Ppu {
         };
 
         // Map the raw sprite color using the selected palette.
-        *pixel = (palette >> (color << 1)) & 0x03;
+        *pixel = (palette >> (color * 2)) & 0x03;
       }
     }
   }
@@ -559,5 +570,5 @@ impl TryFrom<u8> for PpuMode {
 
 /// The amount of memory available to the PPU.
 const VIDEO_RAM_SIZE: u16 = 0x2000;
-/// The amount of memory availabkle for the sprites.
+/// The amount of memory available for the sprites.
 const OAM_SIZE: u16 = 0xA0;

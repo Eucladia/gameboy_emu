@@ -7,13 +7,16 @@ pub mod timer;
 
 pub use cpu::Cpu;
 pub use joypad::Joypad;
-use ppu::PpuMode;
 pub use timer::Timer;
 
 use crate::{
-  hardware::cartridge::{Cartridge, RomOnly},
-  hardware::ppu::{DmaTransfer, Ppu},
-  interrupts::Interrupts,
+  flags::is_flag_set,
+  hardware::{
+    cartridge::{Cartridge, Mbc1, RomOnly},
+    joypad::Button,
+    ppu::{DmaTransfer, Ppu, PpuMode},
+  },
+  interrupts::{Interrupt, Interrupts},
 };
 
 #[derive(Debug)]
@@ -23,14 +26,14 @@ pub struct Hardware {
   /// The high ram.
   high_ram: [u8; HIGH_RAM_SIZE as usize],
   /// The input joypad.
-  joypad: Joypad,
+  pub joypad: Joypad,
   /// The game cartridge.
-  cartridge: Cartridge,
+  pub cartridge: Cartridge,
   /// The timer.
-  timer: Timer,
+  pub timer: Timer,
   /// The pixel processing unit.
-  ppu: Ppu,
-  /// The set interrupts
+  pub ppu: Ppu,
+  /// The enableed and requested interrupts.
   interrupts: Interrupts,
 }
 
@@ -38,7 +41,8 @@ impl Hardware {
   /// Creates a new [`Hardware`] instance from the given bytes.
   pub fn new(bytes: Vec<u8>) -> Self {
     let cartridge = match bytes[CARTRIDGE_TYPE as usize] {
-      0 => Cartridge::RomOnly(RomOnly::new(bytes)),
+      0x0 => Cartridge::RomOnly(RomOnly::new(bytes)),
+      0x01 | 0x02 | 0x03 => Cartridge::Mbc1(Mbc1::new(bytes)),
       b => panic!("got invalid memory cartridge type: {b:02X}"),
     };
 
@@ -62,11 +66,16 @@ impl Hardware {
       0x4000..0x8000 => self.cartridge.read_rom(address),
       // Video RAM
       0x8000..0xA000 => {
-        // VRAM is inaccessible during pixel transfer mode
-        if matches!(self.ppu.current_mode(), PpuMode::PixelTransfer) {
-          0xFF
-        } else {
+        // VRAM is only accessible if the LCD is off or the PPU is not in pixel transfer
+        //
+        // See https://gbdev.io/pandocs/Accessing_VRAM_and_OAM.html for more.
+        if true
+          || !self.ppu.display_enabled()
+          || !matches!(self.ppu.current_mode(), PpuMode::PixelTransfer)
+        {
           self.ppu.read_ram(address)
+        } else {
+          0xFF
         }
       }
       // External RAM
@@ -77,18 +86,25 @@ impl Hardware {
       0xE000..0xFE00 => self.memory[(address - 0xE000) as usize],
       // OAM
       0xFE00..0xFEA0 => {
-        // OAM is inaccessible during OAM and pixel transfer modes
-        if matches!(
-          self.ppu.current_mode(),
-          PpuMode::OamScan | PpuMode::PixelTransfer
-        ) {
-          0xFF
-        } else {
+        // OAM is only accessible if the LCD is off or the PPU is not in OAM scan
+        // and not pixel transfer modes
+        //
+        // See https://gbdev.io/pandocs/Accessing_VRAM_and_OAM.html for more.
+        if true
+          || !self.ppu.display_enabled()
+          || !matches!(
+            self.ppu.current_mode(),
+            PpuMode::OamScan | PpuMode::PixelTransfer
+          )
+        {
           self.ppu.read_oam(address)
+        } else {
+          0xFF
         }
       }
       // Unused
-      0xFEA0..0xFF00 => 0xFF,
+      // These values should return 0, per "The Cycle-Accurate Game Boy Docs"
+      0xFEA0..0xFF00 => 0x00,
       // I/O Registers
       0xFF00..0xFF80 => self.read_io_register(address),
       // High RAM
@@ -101,7 +117,7 @@ impl Hardware {
   /// Reads 16-bits in memory, in little endian, from the given address.
   pub fn read_word(&self, address: u16) -> u16 {
     let lower = self.read_byte(address) as u16;
-    let upper = self.read_byte(address + 1) as u16;
+    let upper = self.read_byte(address.wrapping_add(1)) as u16;
 
     (upper << 8) | lower
   }
@@ -115,8 +131,13 @@ impl Hardware {
       0x4000..0x8000 => self.cartridge.write_rom(address, value),
       // Video RAM
       0x8000..0xA000 => {
-        // Writing to VRAM is undefined when in pixel transfer mode
-        if !matches!(self.ppu.current_mode(), PpuMode::PixelTransfer) {
+        // VRAM is only accessible when the LCD is off or the PPU is not in pixel transfer.
+        //
+        // See https://gbdev.io/pandocs/Accessing_VRAM_and_OAM.html for more.
+        if true
+          || !self.ppu.display_enabled()
+          || !matches!(self.ppu.current_mode(), PpuMode::PixelTransfer)
+        {
           self.ppu.write_ram(address, value)
         }
       }
@@ -128,11 +149,17 @@ impl Hardware {
       0xE000..0xFE00 => self.memory[(address - 0xE000) as usize] = value,
       // OAM
       0xFE00..0xFEA0 => {
-        // Writing to OAM is undefined when in OAM and pixel transfer mode
-        if !matches!(
-          self.ppu.current_mode(),
-          PpuMode::OamScan | PpuMode::PixelTransfer
-        ) {
+        // OAM is only accessible when the LCD is off or the PPU is not in pixel transfer
+        // and not in OAM scan.
+        //
+        // See https://gbdev.io/pandocs/Accessing_VRAM_and_OAM.html for more.
+        if true
+          || !self.ppu.display_enabled()
+          || !matches!(
+            self.ppu.current_mode(),
+            PpuMode::OamScan | PpuMode::PixelTransfer
+          )
+        {
           self.ppu.write_oam(address, value)
         }
       }
@@ -158,23 +185,24 @@ impl Hardware {
         self.ppu.dma_transfer = Some(DmaTransfer::Transferring { current_pos: 0 });
       }
       Some(DmaTransfer::Transferring { current_pos }) => {
+        const DMA_MAX_BYTES_TRANSFERRABLE: u16 = 160;
+
         let mut index = current_pos as u16;
         let starting_address = (self.ppu.dma as u16) << 8;
-        let ending_address = starting_address + 160;
-        let remaining_bytes = ending_address - index;
+        let remaining_bytes = DMA_MAX_BYTES_TRANSFERRABLE - index;
         let iterations = (cycles as u16 / 4).min(remaining_bytes);
 
         for _ in 0..iterations {
           let src_byte = self.read_byte(starting_address + index);
 
-          // Use PPU's write_oam method because Hardware's write_byte fn checks for
+          // Use `Ppu::write_oam` method because Hardware::write_byte` checks for
           // active DMA transfers.
           self.ppu.write_oam(0xFE00 + index, src_byte);
 
           index += 1;
         }
 
-        if index >= 160 {
+        if index >= DMA_MAX_BYTES_TRANSFERRABLE {
           self.ppu.dma_transfer = None;
         } else {
           self.ppu.dma_transfer = Some(DmaTransfer::Transferring {
@@ -186,9 +214,37 @@ impl Hardware {
     }
   }
 
+  /// Presses or releases a [`Button`].
+  pub fn update_button(&mut self, button: Button, pressed: bool) {
+    self
+      .joypad
+      .update_button_state(&mut self.interrupts, button, pressed);
+  }
+
+  /// Steps the timer with the following number of cycles.
+  pub fn step_timer(&mut self, cycles: usize) {
+    self.timer.step(&mut self.interrupts, cycles);
+  }
+
+  /// Steps the PPU with the following number of cycles.
+  pub fn step_ppu(&mut self, cycles: usize) {
+    self.ppu.step(&mut self.interrupts, cycles);
+  }
+
   /// Checks if there are any pending interrupts.
   pub fn has_pending_interrupts(&self) -> bool {
     (self.interrupts.enabled_bitfield() & self.interrupts.requested_bitfield()) != 0
+  }
+
+  /// Checks if the following interrupt has been requested.
+  pub fn is_interrupt_requested(&self, interrupt: Interrupt) -> bool {
+    is_flag_set!(self.interrupts.enabled_bitfield(), interrupt as u8)
+      && is_flag_set!(self.interrupts.requested_bitfield(), interrupt as u8)
+  }
+
+  /// Clears a requested [`Interrupt`].
+  pub fn clear_interrupt(&mut self, interrupt: Interrupt) {
+    self.interrupts.clear_interrupt(interrupt);
   }
 
   /// Gets the active DMA transfer.
@@ -196,15 +252,23 @@ impl Hardware {
     self.ppu.dma_transfer.as_ref()
   }
 
+  /// Gets the frame buffer from the PPU.
+  pub fn frame_buffer(&self) -> &[[u8; 160]; 144] {
+    self.ppu.buffer()
+  }
+
   /// Reads the I/O registers.
   fn read_io_register(&self, address: u16) -> u8 {
     match address {
       0xFF00 => self.joypad.read_register(),
+      // Serial transfer
+      0xFF01 | 0xFF02 => 0x0,
       0xFF04..0xFF08 => self.timer.read_register(address),
       0xFF40..0xFF4B => self.ppu.read_register(address),
       0xFF0F => self.interrupts.requested_bitfield(),
-      0xFF10..0xFF27 | 0xFF30..0xFF40 => todo!("audio is unimplemented"),
-      _ => unreachable!(),
+      // Audio stuff
+      0xFF10..0xFF27 | 0xFF30..0xFF40 => 0x00,
+      x => 0xFF,
     }
   }
 
@@ -212,11 +276,14 @@ impl Hardware {
   fn write_io_register(&mut self, address: u16, value: u8) {
     match address {
       0xFF00 => self.joypad.write_register(value),
+      // Serial transfer
+      0xFF01 | 0xFF02 => {}
       0xFF04..0xFF08 => self.timer.write_register(address, value),
       0xFF40..0xFF4B => self.ppu.write_register(address, value),
       0xFF0F => self.interrupts.set_requested(value),
-      0xFF10..0xFF27 | 0xFF30..0xFF40 => todo!("audio is unimplemented"),
-      _ => unreachable!(),
+      // Audio
+      0xFF10..0xFF27 | 0xFF30..0xFF40 => {}
+      _ => {}
     }
   }
 }

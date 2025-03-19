@@ -56,7 +56,7 @@ impl Interrupts {
   }
 
   /// Checks if the following [`Interrupt`] was requested.
-  pub fn was_requested(&mut self, interrupt: Interrupt) -> bool {
+  pub fn is_requested(&mut self, interrupt: Interrupt) -> bool {
     is_flag_set!(self.requested, interrupt as u8)
   }
 
@@ -65,9 +65,9 @@ impl Interrupts {
     self.requested = add_flag!(self.requested, interrupt as u8);
   }
 
-  /// Updates the requested interrupts to the following value.
+  /// Sets the requested interrupts to the following value.
   pub fn set_requested(&mut self, value: u8) {
-    self.requested = add_flag!(self.requested, value & 0b1_1111);
+    self.requested = value & 0b1_1111;
   }
 
   /// Clears a requested [`Interrupt`].
