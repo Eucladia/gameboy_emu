@@ -163,29 +163,21 @@ fn main() {
             // Pre-fill the buffer with black in release builds
             window_frame.fill(0x00000000);
 
-            // TODO: I feel like this could be better written
-            for y in 0..height {
-              for x in 0..width {
-                let idx = (y * width + x) as usize;
+            for y in offset_y..offset_y + game_height {
+              for x in offset_x..offset_x + game_width {
+                let index = width * y + x;
+                let src_x = (((x - offset_x) as f64 / scale) as u32).min(GAMEBOY_WIDTH - 1);
+                let src_y = (((y - offset_y) as f64 / scale) as u32).min(GAMEBOY_HEIGHT - 1);
 
-                if x >= offset_x
-                  && x < offset_x + game_width
-                  && y >= offset_y
-                  && y < offset_y + game_height
-                {
-                  let src_x = (((x - offset_x) as f64 / scale) as u32).min(GAMEBOY_WIDTH - 1);
-                  let src_y = (((y - offset_y) as f64 / scale) as u32).min(GAMEBOY_HEIGHT - 1);
+                let color = match game_buffer[src_y as usize][src_x as usize] {
+                  0 => 0x00FFFFFF,
+                  1 => 0x0088C070,
+                  2 => 0x00346856,
+                  3 => 0x00081820,
+                  _ => 0x00FF0000,
+                };
 
-                  let color = match game_buffer[src_y as usize][src_x as usize] {
-                    0 => 0x00FFFFFF,
-                    1 => 0x0088C070,
-                    2 => 0x00346856,
-                    3 => 0x00081820,
-                    _ => 0x00FF0000,
-                  };
-
-                  window_frame[idx] = color;
-                }
+                window_frame[index as usize] = color;
               }
             }
 
