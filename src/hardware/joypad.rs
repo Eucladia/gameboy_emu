@@ -57,7 +57,7 @@ impl Joypad {
     };
 
     // The upper 2 bits are always set
-    0b1100_000 | self.button_group | lower_nibble
+    0b1100_0000 | self.button_group | lower_nibble
   }
 
   /// Updates the [`Joypad`] button group.
@@ -67,7 +67,6 @@ impl Joypad {
   }
 
   /// Updates the button's state, requesting an interrupt if a button was pressed or released.
-  // TODO: Rename
   pub fn update_button_state(
     &mut self,
     interrupts: &mut Interrupts,

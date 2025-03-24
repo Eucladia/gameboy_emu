@@ -1,4 +1,3 @@
-// EDITED
 use crate::{
   flags::is_flag_set,
   interrupts::{Interrupt, Interrupts},

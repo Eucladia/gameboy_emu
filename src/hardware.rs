@@ -69,9 +69,7 @@ impl Hardware {
         // VRAM is only accessible if the LCD is off or the PPU is not in pixel transfer
         //
         // See https://gbdev.io/pandocs/Accessing_VRAM_and_OAM.html for more.
-        if true
-          || !self.ppu.display_enabled()
-          || !matches!(self.ppu.current_mode(), PpuMode::PixelTransfer)
+        if !self.ppu.display_enabled() || !matches!(self.ppu.current_mode(), PpuMode::PixelTransfer)
         {
           self.ppu.read_ram(address)
         } else {
@@ -90,8 +88,7 @@ impl Hardware {
         // and not pixel transfer modes
         //
         // See https://gbdev.io/pandocs/Accessing_VRAM_and_OAM.html for more.
-        if true
-          || !self.ppu.display_enabled()
+        if !self.ppu.display_enabled()
           || !matches!(
             self.ppu.current_mode(),
             PpuMode::OamScan | PpuMode::PixelTransfer
@@ -134,9 +131,7 @@ impl Hardware {
         // VRAM is only accessible when the LCD is off or the PPU is not in pixel transfer.
         //
         // See https://gbdev.io/pandocs/Accessing_VRAM_and_OAM.html for more.
-        if true
-          || !self.ppu.display_enabled()
-          || !matches!(self.ppu.current_mode(), PpuMode::PixelTransfer)
+        if !self.ppu.display_enabled() || !matches!(self.ppu.current_mode(), PpuMode::PixelTransfer)
         {
           self.ppu.write_ram(address, value)
         }
@@ -153,8 +148,7 @@ impl Hardware {
         // and not in OAM scan.
         //
         // See https://gbdev.io/pandocs/Accessing_VRAM_and_OAM.html for more.
-        if true
-          || !self.ppu.display_enabled()
+        if !self.ppu.display_enabled()
           || !matches!(
             self.ppu.current_mode(),
             PpuMode::OamScan | PpuMode::PixelTransfer
@@ -268,7 +262,7 @@ impl Hardware {
       0xFF0F => self.interrupts.requested_bitfield(),
       // Audio stuff
       0xFF10..0xFF27 | 0xFF30..0xFF40 => 0x00,
-      x => 0xFF,
+      _ => 0xFF,
     }
   }
 
