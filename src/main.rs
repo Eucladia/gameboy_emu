@@ -26,7 +26,8 @@ use winit::{
   window::WindowBuilder,
 };
 
-const FRAME_TIME: Duration = Duration::from_millis(16);
+/// The Gameboy runs at 59.7275 frames per second.
+const FRAME_TIME: Duration = Duration::from_micros(16_740);
 
 const GAMEBOY_WIDTH: u32 = 160;
 const GAMEBOY_HEIGHT: u32 = 144;
