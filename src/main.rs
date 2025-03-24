@@ -38,12 +38,15 @@ const INITIAL_GAMEBOY_HEIGHT: u32 = GAMEBOY_HEIGHT * 3;
 fn main() {
   let mut args = std::env::args();
 
+  // The first argument is usually the executable name
+  args.next();
+
   let Some(game_rom) = args.next() else {
     eprintln!("Expected a game to be passed as an argument!");
     return;
   };
 
-  let rom_bytes = fs::read(game_rom).unwrap();
+  let rom_bytes = fs::read(&game_rom).unwrap();
 
   let cpu = Cpu::with_register_defaults();
   let hardware = Hardware::new(rom_bytes);
