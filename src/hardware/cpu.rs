@@ -639,20 +639,18 @@ impl Cpu {
         let should_jump = self.is_conditional_flag_set(flag);
 
         if should_jump {
-          self.write_stack_word(hardware, self.registers.pc);
+          self.push_stack_word(hardware, self.registers.pc);
 
           self.registers.pc = address;
-          self.registers.sp = self.registers.sp.wrapping_sub(2);
           self.clock.advance(6);
         } else {
           self.clock.advance(3);
         }
       }
       &CALL(None, Operand::Word(address)) => {
-        self.write_stack_word(hardware, self.registers.pc);
+        self.push_stack_word(hardware, self.registers.pc);
 
         self.registers.pc = address;
-        self.registers.sp = self.registers.sp.wrapping_sub(2);
         self.clock.advance(6);
       }
       &JP(Some(Operand::Conditional(flag)), Operand::Word(address)) => {
@@ -695,34 +693,30 @@ impl Cpu {
         let should_jump = self.is_conditional_flag_set(flag);
 
         if should_jump {
-          let addr = self.read_stack_word(hardware);
+          let addr = self.pop_stack_word(hardware);
 
           self.registers.pc = addr;
-          self.registers.sp = self.registers.sp.wrapping_add(2);
           self.clock.advance(5);
         } else {
           self.clock.advance(2);
         }
       }
       RET(None) => {
-        let addr = self.read_stack_word(hardware);
+        let addr = self.pop_stack_word(hardware);
 
         self.registers.pc = addr;
-        self.registers.sp = self.registers.sp.wrapping_add(2);
         self.clock.advance(4);
       }
       RETI => {
-        let addr = self.read_stack_word(hardware);
+        let addr = self.pop_stack_word(hardware);
 
         self.registers.pc = addr;
-        self.registers.sp = self.registers.sp.wrapping_add(2);
         self.master_interrupt_enabled = true;
         self.clock.advance(4);
       }
       &RST(Operand::Byte(target)) => {
-        self.write_stack_word(hardware, self.registers.pc);
+        self.push_stack_word(hardware, self.registers.pc);
 
-        self.registers.sp = self.registers.sp.wrapping_sub(2);
         self.registers.pc = target as u16;
         self.clock.advance(4);
       }
@@ -757,19 +751,17 @@ impl Cpu {
       }
 
       &POP(Operand::RegisterPair(rp)) => {
-        let value = self.read_stack_word(hardware);
+        let value = self.pop_stack_word(hardware);
 
         self.write_register_pair(rp, value);
 
-        self.registers.sp = self.registers.sp.wrapping_add(2);
         self.clock.advance(3);
       }
       &PUSH(Operand::RegisterPair(rp)) => {
         let reg_value = self.read_register_pair(rp);
 
-        self.write_stack_word(hardware, reg_value);
+        self.push_stack_word(hardware, reg_value);
 
-        self.registers.sp = self.registers.sp.wrapping_sub(2);
         self.clock.advance(4);
       }
       CCF => {
@@ -1518,8 +1510,7 @@ impl Cpu {
 
         hardware.clear_interrupt(Interrupt::VBlank);
 
-        self.write_stack_word(hardware, self.registers.pc);
-        self.registers.sp = self.registers.sp.wrapping_sub(2);
+        self.push_stack_word(hardware, self.registers.pc);
 
         self.registers.pc = 0x40;
       }
@@ -1531,8 +1522,7 @@ impl Cpu {
 
         hardware.clear_interrupt(Interrupt::Lcd);
 
-        self.write_stack_word(hardware, self.registers.pc);
-        self.registers.sp = self.registers.sp.wrapping_sub(2);
+        self.push_stack_word(hardware, self.registers.pc);
 
         self.registers.pc = 0x48;
       }
@@ -1544,8 +1534,7 @@ impl Cpu {
 
         hardware.clear_interrupt(Interrupt::Timer);
 
-        self.write_stack_word(hardware, self.registers.pc);
-        self.registers.sp = self.registers.sp.wrapping_sub(2);
+        self.push_stack_word(hardware, self.registers.pc);
 
         self.registers.pc = 0x50;
       }
@@ -1557,8 +1546,7 @@ impl Cpu {
 
         hardware.clear_interrupt(Interrupt::Serial);
 
-        self.write_stack_word(hardware, self.registers.pc);
-        self.registers.sp = self.registers.sp.wrapping_sub(2);
+        self.push_stack_word(hardware, self.registers.pc);
 
         self.registers.pc = 0x58;
       }
@@ -1570,8 +1558,7 @@ impl Cpu {
 
         hardware.clear_interrupt(Interrupt::Joypad);
 
-        self.write_stack_word(hardware, self.registers.pc);
-        self.registers.sp = self.registers.sp.wrapping_sub(2);
+        self.push_stack_word(hardware, self.registers.pc);
 
         self.registers.pc = 0x60;
       }
@@ -1683,6 +1670,15 @@ impl Cpu {
     ((upper as u16) << 8) | lower as u16
   }
 
+  /// Pops 16-bits of memory from the stack.
+  fn pop_stack_word(&mut self, hardware: &Hardware) -> u16 {
+    let word = self.read_stack_word(hardware);
+
+    self.registers.sp = self.registers.sp.wrapping_add(2);
+
+    word
+  }
+
   /// Writes the 16-bit value to the stack, without modifying the SP.
   fn write_stack_word(&self, hardware: &mut Hardware, value: u16) {
     let upper = ((value >> 8) & 0xFF) as u8;
@@ -1690,6 +1686,12 @@ impl Cpu {
 
     hardware.write_byte(self.registers.sp.wrapping_sub(1), upper);
     hardware.write_byte(self.registers.sp.wrapping_sub(2), lower);
+  }
+
+  /// Pushes the 16-bit value on to the stack.
+  fn push_stack_word(&mut self, hardware: &mut Hardware, value: u16) {
+    self.write_stack_word(hardware, value);
+    self.registers.sp = self.registers.sp.wrapping_sub(2);
   }
 
   /// Returns whether the following [`ConditionalFlag`] is set.
