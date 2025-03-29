@@ -2,6 +2,7 @@ use crate::{
   flags::{add_flag, is_flag_set, remove_flag},
   interrupts::{Interrupt, Interrupts},
 };
+use smallvec::SmallVec;
 
 /// The pixel processing unit.
 #[derive(Debug)]
@@ -186,7 +187,14 @@ impl Ppu {
   /// Writes the value of the register referencing the address.
   pub fn write_register(&mut self, address: u16, value: u8) {
     match address {
-      0xFF40 => self.lcdc = value,
+      0xFF40 => {
+        self.lcdc = value;
+
+        // Reset window line when the window gets disabled
+        if !is_flag_set!(self.lcdc, LcdControl::WindowDisplay as u8) {
+          self.window_line = 0;
+        }
+      }
       // Preserve the PPU mode in the lower 2 bits
       0xFF41 => self.stat = (value & 0b0111_1100) | self.current_mode() as u8,
       0xFF42 => self.scy = value,
@@ -333,8 +341,9 @@ impl Ppu {
       let x_pos = (x as u16).wrapping_add(self.scx as u16);
       let tile_col = (x_pos / 8) % 32;
       let tile_index = self.read_ram(bg_tile_map + tile_row + tile_col);
+      let raw_pixel = self.get_tile_pixel(tile_index, (y % 8) as u8, (x_pos % 8) as u8);
 
-      *pixel = self.get_tile_pixel(tile_index, (y % 8) as u8, (x_pos % 8) as u8);
+      *pixel = (self.bgp >> (raw_pixel * 2)) & 0x03;
     }
   }
 
@@ -345,6 +354,10 @@ impl Ppu {
       return;
     }
 
+    if self.wx < 7 || self.wx >= 160 {
+      return;
+    }
+
     let window_tile_map = if is_flag_set!(self.lcdc, LcdControl::WindowTileMap as u8) {
       0x9C00
     } else {
@@ -352,7 +365,7 @@ impl Ppu {
     };
 
     // Offset by -7 because thats where the window starts
-    let window_x_start = self.wx.saturating_sub(7);
+    let window_x_start = self.wx - 7;
     let window_y = self.window_line as u16;
     // Window tile map have 32 tiles per row
     let tile_row = (window_y / 8) * 32;
@@ -362,16 +375,14 @@ impl Ppu {
       let window_x = (screen_x - window_x_start) as u16;
       let tile_col = window_x / 8;
       let tile_index = self.read_ram(window_tile_map + tile_row + tile_col);
+      let raw_pixel = self.get_tile_pixel(tile_index, (window_y % 8) as u8, (window_x % 8) as u8);
 
-      scanline[screen_x as usize] =
-        self.get_tile_pixel(tile_index, (window_y % 8) as u8, (window_x % 8) as u8);
+      scanline[screen_x as usize] = (self.bgp >> (raw_pixel * 2)) & 0x03;
     }
   }
 
   /// Renders sprites into the scanline.
   fn render_sprites(&self, scanline: &mut [u8; 160]) {
-    // The Gameboy can only draw 10 visible sprites per scanline
-    let mut sprites_drawn = 0;
     // Bit 2 determines the sprite's height
     let sprite_height = if is_flag_set!(self.lcdc, LcdControl::SpriteDimensions as u8) {
       16
@@ -379,8 +390,11 @@ impl Ppu {
       8
     };
 
+    // The Gameboy can only draw 10 sprites per scanline.
+    let mut sprites = SmallVec::<[Sprite; 10]>::new();
+
     for chunk in self.oam.chunks_exact(4) {
-      if sprites_drawn >= 10 {
+      if sprites.len() >= 10 {
         break;
       }
 
@@ -392,38 +406,55 @@ impl Ppu {
       };
 
       // A Y-coordinate of 16 means the sprite is fully visible, so offset it by -16
-      let sprite_y = raw_y as i16 - 16;
+      // Wrapping subtraction is fine here, since we'll still be out of bounds
+      let sprite_y = raw_y.wrapping_sub(16);
 
       // Ignore invisible sprites (those not within the bounds of the screen or not on
       // the current scanline) and don't count it towards the sprite limit.
-      if raw_y == 0
-        || raw_y >= 160
-        || (self.ly as i16) < sprite_y
-        || (self.ly as i16) >= sprite_y + sprite_height
-      {
+      if raw_y == 0 || raw_y >= 160 || self.ly < sprite_y || self.ly >= sprite_y + sprite_height {
         continue;
       }
 
-      sprites_drawn += 1;
+      // Offset by -8 because a sprite is fully visibile at position 8
+      let sprite_x = raw_x.wrapping_sub(8);
+      let oam_index = sprites.len();
 
-      // A X-coordinate of 8 means the sprite is fully visible, so offset it by -8
-      let sprite_x = raw_x as i16 - 8;
+      sprites.push(Sprite {
+        x: sprite_x,
+        y: sprite_y,
+        tile_index,
+        attributes,
+        oam_position: oam_index as u8,
+      });
+    }
 
+    // Sort in reverse order, based on the position it was in OAM if the sprite's X-coordinates
+    // were equal, otherwise by the X-coordinates.
+    sprites.sort_by(|sprite_a, sprite_b| {
+      if sprite_a.x == sprite_b.x {
+        sprite_b.oam_position.cmp(&sprite_a.oam_position)
+      } else {
+        sprite_b.x.cmp(&sprite_a.x)
+      }
+    });
+
+    // Draw the 10 sprites
+    for sprite in &sprites {
       // Get the row where the sprite should be drawn
       let row = {
-        let line = self.ly as i16 - sprite_y;
+        let line = self.ly.wrapping_sub(sprite.y);
 
-        if is_flag_set!(attributes, SpriteAttributes::YFlip as u8) {
-          (sprite_height - 1 - line) as u8
+        if is_flag_set!(sprite.attributes, SpriteAttributes::YFlip as u8) {
+          sprite_height - 1 - line
         } else {
-          line as u8
+          line
         }
       };
 
       let (tile_to_use, tile_row) = if sprite_height == 16 {
         // For 8×16 sprites, we need to clear the LSB of the top tile
         // and set it for the bottom tile
-        let cleared_tile = tile_index & 0xFE;
+        let cleared_tile = sprite.tile_index & 0xFE;
 
         if row < 8 {
           (cleared_tile, row)
@@ -431,33 +462,33 @@ impl Ppu {
           (cleared_tile | 0x01, row - 8)
         }
       } else {
-        (tile_index, row)
+        (sprite.tile_index, row)
       };
 
       // Render the 8 pixels in each tile
       for x_offset in 0..8 {
-        let screen_x = sprite_x + x_offset as i16;
+        let screen_x = sprite.x.wrapping_add(x_offset);
 
         // Don't draw sprites that are off the screen
-        if screen_x < 0 || screen_x >= 160 {
+        if screen_x >= 160 {
           continue;
         }
 
         let pixel = &mut scanline[screen_x as usize];
 
         // Don't draw over the background if the sprite has lower priority.
-        if is_flag_set!(attributes, SpriteAttributes::Priority as u8) && *pixel != 0 {
+        if is_flag_set!(sprite.attributes, SpriteAttributes::Priority as u8) && *pixel != 0 {
           continue;
         }
 
-        let flip_x = is_flag_set!(attributes, SpriteAttributes::XFlip as u8);
+        let flip_x = is_flag_set!(sprite.attributes, SpriteAttributes::XFlip as u8);
         let color = self.get_sprite_pixel(tile_to_use, tile_row, x_offset, flip_x);
 
         if color == 0 {
           continue;
         }
 
-        let palette = if is_flag_set!(attributes, SpriteAttributes::DmgPalette as u8) {
+        let palette = if is_flag_set!(sprite.attributes, SpriteAttributes::DmgPalette as u8) {
           self.obp1
         } else {
           self.obp0
@@ -468,6 +499,16 @@ impl Ppu {
       }
     }
   }
+}
+
+/// A sprite from the OAM.
+#[derive(Debug, Clone)]
+struct Sprite {
+  pub x: u8,
+  pub y: u8,
+  pub tile_index: u8,
+  pub attributes: u8,
+  pub oam_position: u8,
 }
 
 /// Flags for the `stat` field.
