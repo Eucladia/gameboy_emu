@@ -124,10 +124,12 @@ impl Ppu {
           }
 
           if self.ly == 144 {
+            interrupts.request_interrupt(Interrupt::VBlank);
             self.set_current_mode(PpuMode::VBlank);
 
-            // VBlanks are always fired when entering VBlank mode
-            interrupts.request_interrupt(Interrupt::VBlank);
+            if is_flag_set!(self.stat, StatFlag::VBlankInterrupt as u8) {
+              interrupts.request_interrupt(Interrupt::Lcd);
+            }
           } else {
             self.set_current_mode(PpuMode::OamScan);
           }
