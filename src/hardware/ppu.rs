@@ -151,17 +151,11 @@ impl Ppu {
 
           if self.ly > 153 {
             self.ly = 0;
+            self.window_line = 0;
             self.set_current_mode(PpuMode::OamScan);
           }
         }
       }
-    }
-
-    // Increment the window scanline only if it's visible
-    if self.ly >= self.wy {
-      self.window_line = self.window_line.wrapping_add(1);
-    } else {
-      self.window_line = 0;
     }
   }
 
@@ -188,12 +182,14 @@ impl Ppu {
   pub fn write_register(&mut self, address: u16, value: u8) {
     match address {
       0xFF40 => {
-        self.lcdc = value;
-
         // Reset window line when the window gets disabled
-        if !is_flag_set!(self.lcdc, LcdControl::WindowDisplay as u8) {
+        if is_flag_set!(self.lcdc, LcdControl::WindowDisplay as u8)
+          && !is_flag_set!(value, LcdControl::WindowDisplay as u8)
+        {
           self.window_line = 0;
         }
+
+        self.lcdc = value;
       }
       // Preserve the PPU mode in the lower 2 bits
       0xFF41 => self.stat = (value & 0b0111_1100) | self.current_mode() as u8,
@@ -326,7 +322,7 @@ impl Ppu {
   }
 
   /// Renders the background into the provided scanline.
-  fn render_background(&self, scanline: &mut [u8; 160]) {
+  fn render_background(&mut self, scanline: &mut [u8; 160]) {
     let bg_tile_map = if is_flag_set!(self.lcdc, LcdControl::BackgroundTileMap as u8) {
       0x9C00
     } else {
@@ -348,13 +344,16 @@ impl Ppu {
   }
 
   /// Renders the window into the scanline.
-  fn render_window(&self, scanline: &mut [u8; 160]) {
+  fn render_window(&mut self, scanline: &mut [u8; 160]) {
     // The window is only drawn on scanlines at or below the window Y-position
     if self.ly < self.wy {
       return;
     }
 
-    if self.wx < 7 || self.wx >= 160 {
+    // Offset by -7 because thats where the window starts
+    let window_x = self.wx.saturating_sub(7);
+
+    if window_x >= 160 {
       return;
     }
 
@@ -364,25 +363,29 @@ impl Ppu {
       0x9800
     };
 
-    // Offset by -7 because thats where the window starts
-    let window_x_start = self.wx - 7;
     let window_y = self.window_line as u16;
     // Window tile map have 32 tiles per row
     let tile_row = (window_y / 8) * 32;
 
-    // Render window pixels starting at window_x_start.
-    for screen_x in window_x_start..160 {
-      let window_x = (screen_x - window_x_start) as u16;
+    // Render the rest of the tiles on this scanline
+    for x in window_x..160 {
+      let window_x = (x - window_x) as u16;
       let tile_col = window_x / 8;
       let tile_index = self.read_ram(window_tile_map + tile_row + tile_col);
       let raw_pixel = self.get_tile_pixel(tile_index, (window_y % 8) as u8, (window_x % 8) as u8);
 
-      scanline[screen_x as usize] = (self.bgp >> (raw_pixel * 2)) & 0x03;
+      scanline[x as usize] = (self.bgp >> (raw_pixel * 2)) & 0x03;
     }
+
+    // The window's internal counter is only incremented after window rendering
+    self.window_line = self.window_line.wrapping_add(1);
   }
 
   /// Renders sprites into the scanline.
-  fn render_sprites(&self, scanline: &mut [u8; 160]) {
+  fn render_sprites(&mut self, scanline: &mut [u8; 160]) {
+    // The Gameboy can only draw 10 sprites per scanline.
+    const MAX_SCANLINE_SPRITES: usize = 10;
+
     // Bit 2 determines the sprite's height
     let sprite_height = if is_flag_set!(self.lcdc, LcdControl::SpriteDimensions as u8) {
       16
@@ -390,11 +393,10 @@ impl Ppu {
       8
     };
 
-    // The Gameboy can only draw 10 sprites per scanline.
-    let mut sprites = SmallVec::<[Sprite; 10]>::new();
+    let mut sprites = SmallVec::<[SpriteEntry; MAX_SCANLINE_SPRITES]>::new();
 
     for chunk in self.oam.chunks_exact(4) {
-      if sprites.len() >= 10 {
+      if sprites.len() >= MAX_SCANLINE_SPRITES {
         break;
       }
 
@@ -419,7 +421,7 @@ impl Ppu {
       let sprite_x = raw_x.wrapping_sub(8);
       let oam_index = sprites.len();
 
-      sprites.push(Sprite {
+      sprites.push(SpriteEntry {
         x: sprite_x,
         y: sprite_y,
         tile_index,
@@ -501,13 +503,18 @@ impl Ppu {
   }
 }
 
-/// A sprite from the OAM.
+/// A sprite entry from the OAM.
 #[derive(Debug, Clone)]
-struct Sprite {
+struct SpriteEntry {
+  /// The X-position of the sprite.
   pub x: u8,
+  /// The Y-position of the sprite.
   pub y: u8,
+  /// The tile index of the sprite.
   pub tile_index: u8,
+  /// The attributes of the sprite.
   pub attributes: u8,
+  /// The position in the OAM of this sprite.
   pub oam_position: u8,
 }
 

@@ -258,7 +258,7 @@ impl Hardware {
       // Serial transfer
       0xFF01 | 0xFF02 => 0x0,
       0xFF04..0xFF08 => self.timer.read_register(address),
-      0xFF40..0xFF4B => self.ppu.read_register(address),
+      0xFF40..0xFF4C => self.ppu.read_register(address),
       0xFF0F => self.interrupts.requested_bitfield(),
       // Audio stuff
       0xFF10..0xFF27 | 0xFF30..0xFF40 => 0x00,
@@ -273,7 +273,7 @@ impl Hardware {
       // Serial transfer
       0xFF01 | 0xFF02 => {}
       0xFF04..0xFF08 => self.timer.write_register(address, value),
-      0xFF40..0xFF4B => self.ppu.write_register(address, value),
+      0xFF40..0xFF4C => self.ppu.write_register(address, value),
       0xFF0F => self.interrupts.set_requested(value),
       // Audio
       0xFF10..0xFF27 | 0xFF30..0xFF40 => {}
