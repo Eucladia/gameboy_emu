@@ -27,7 +27,7 @@ pub struct Ppu {
   /// The window's scanline.
   ///
   /// See https://gbdev.io/pandocs/Tile_Maps.html#window for more.
-  window_line: u8,
+  wly: u8,
   /// LY Compare.
   lyc: u8,
   /// Background and Window palette.
@@ -60,7 +60,7 @@ impl Ppu {
       scy: 0,
       scx: 0,
       ly: 0,
-      window_line: 0,
+      wly: 0,
       lyc: 0,
       bgp: 0,
       obp0: 0,
@@ -153,7 +153,7 @@ impl Ppu {
 
           if self.ly > 153 {
             self.ly = 0;
-            self.window_line = 0;
+            self.wly = 0;
             self.set_current_mode(PpuMode::OamScan);
           }
         }
@@ -188,7 +188,7 @@ impl Ppu {
         if is_flag_set!(self.lcdc, LcdControl::WindowDisplay as u8)
           && !is_flag_set!(value, LcdControl::WindowDisplay as u8)
         {
-          self.window_line = 0;
+          self.wly = 0;
         }
 
         self.lcdc = value;
@@ -365,7 +365,7 @@ impl Ppu {
       0x9800
     };
 
-    let window_y = self.window_line as u16;
+    let window_y = self.wly as u16;
     // Window tile map have 32 tiles per row
     let tile_row = (window_y / 8) * 32;
 
@@ -380,7 +380,7 @@ impl Ppu {
     }
 
     // The window's internal counter is only incremented after window rendering
-    self.window_line = self.window_line.wrapping_add(1);
+    self.wly = self.wly.wrapping_add(1);
   }
 
   /// Renders sprites into the scanline.
