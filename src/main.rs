@@ -8,18 +8,16 @@ mod interrupts;
 use emulator::Emulator;
 use flags::is_flag_set;
 use hardware::{Cpu, Hardware, joypad::Button};
-
-use softbuffer::{Context, Surface};
+use pixels::{Pixels, SurfaceTexture, wgpu::PresentMode};
 
 use std::{
   fs,
-  num::NonZeroU32,
-  rc::Rc,
+  sync::Arc,
   time::{Duration, Instant},
 };
 
 use winit::{
-  dpi::LogicalSize,
+  dpi::{LogicalSize, PhysicalSize},
   event::{ElementState, Event, KeyEvent, WindowEvent},
   event_loop::{ControlFlow, EventLoop},
   keyboard::{KeyCode, PhysicalKey},
@@ -53,7 +51,7 @@ fn main() {
   let mut emulator = Emulator::new(cpu, hardware);
 
   let event_loop = EventLoop::new().unwrap();
-  let window = Rc::new(
+  let window = Arc::new(
     WindowBuilder::new()
       .with_min_inner_size(LogicalSize::new(GAMEBOY_WIDTH, GAMEBOY_HEIGHT))
       .with_inner_size(LogicalSize::new(
@@ -65,8 +63,14 @@ fn main() {
       .unwrap(),
   );
 
-  let context = Context::new(Rc::clone(&window)).unwrap();
-  let mut surface = Surface::new(&context, Rc::clone(&window)).unwrap();
+  let mut pixels = {
+    let PhysicalSize { width, height } = window.inner_size();
+    let surface_texture = SurfaceTexture::new(width, height, Arc::clone(&window));
+
+    Pixels::new(width, height, surface_texture).unwrap()
+  };
+
+  pixels.set_present_mode(PresentMode::Immediate);
 
   let mut last_update = Instant::now();
   let mut first_update = true;
@@ -96,17 +100,15 @@ fn main() {
 
       match event {
         Event::WindowEvent {
-          window_id,
           event: WindowEvent::CloseRequested,
           ..
-        } if window_id == window.id() => elwt.exit(),
+        } => elwt.exit(),
 
         Event::AboutToWait => {
           window.request_redraw();
         }
 
         Event::WindowEvent {
-          window_id,
           event:
             WindowEvent::KeyboardInput {
               event:
@@ -117,7 +119,8 @@ fn main() {
                 },
               ..
             },
-        } if window_id == window.id() => match physical_key {
+          ..
+        } => match physical_key {
           PhysicalKey::Code(KeyCode::ShiftLeft | KeyCode::ShiftRight) => {
             is_shift_held = matches!(state, ElementState::Pressed);
           }
@@ -147,10 +150,9 @@ fn main() {
         },
 
         Event::WindowEvent {
-          window_id,
           event: WindowEvent::RedrawRequested,
           ..
-        } if window_id == window.id() => {
+        } => {
           let now = Instant::now();
 
           if first_update || !limit_frames || now >= last_update + FRAME_TIME {
@@ -160,14 +162,8 @@ fn main() {
             };
 
             if width != last_width || height != last_height {
-              surface
-                .resize(
-                  NonZeroU32::new(width).unwrap(),
-                  NonZeroU32::new(height).unwrap(),
-                )
-                .unwrap();
-
-              window_frame.resize((width * height) as usize, 0);
+              pixels.resize_buffer(width, height).unwrap();
+              pixels.resize_surface(width, height).unwrap();
 
               last_width = width;
               last_height = height;
@@ -185,28 +181,32 @@ fn main() {
 
             let game_buffer = emulator.hardware.frame_buffer();
 
-            #[cfg(debug_assertions)]
-            // Pre-fill the buffer with green in debug mode
-            window_frame.fill(0x0000FF00);
-            #[cfg(not(debug_assertions))]
-            // Pre-fill the buffer with black in release builds
-            window_frame.fill(0x00000000);
+            let buffer = pixels.frame_mut();
+
+            buffer.fill(0x00);
+
+            // #[cfg(debug_assertions)]
+            // // Pre-fill the buffer with green in debug mode
+            // buffer.fill(0x00FF00FF);
+            // #[cfg(not(debug_assertions))]
+            // // Pre-fill the buffer with black in release builds
+            // buffer.fill(0x000000FF);
 
             for y in offset_y..offset_y + game_height {
               for x in offset_x..offset_x + game_width {
-                let index = width * y + x;
+                let index = 4 * (width * y + x) as usize;
                 let src_x = (((x - offset_x) as f64 / scale) as u32).min(GAMEBOY_WIDTH - 1);
                 let src_y = (((y - offset_y) as f64 / scale) as u32).min(GAMEBOY_HEIGHT - 1);
 
                 let color = match game_buffer[src_y as usize][src_x as usize] {
-                  0 => 0x00FFFFFF,
-                  1 => 0x0088C070,
-                  2 => 0x00346856,
-                  3 => 0x00081820,
-                  _ => 0x00FF0000,
+                  0 => [0xFF, 0xFF, 0xFF, 0xFF],
+                  1 => [0x88, 0xC0, 0x70, 0xFF],
+                  2 => [0x34, 0x68, 0x56, 0xFF],
+                  3 => [0x08, 0x18, 0x20, 0xFF],
+                  _ => [0xFF, 0x00, 0x00, 0xFF],
                 };
 
-                window_frame[index as usize] = color;
+                buffer[index..index + 4].copy_from_slice(&color);
               }
             }
 
@@ -223,13 +223,13 @@ fn main() {
             if show_fps {
               const FPS_X_POS: u32 = 2;
               const FPS_Y_POS: u32 = 2;
-              const FPS_TEXT_COLOR: u32 = 0x00FF0000;
+              const FPS_TEXT_COLOR: u32 = 0xFF0000FF;
 
               let fps_text = format!("FPS: {:.4}", fps);
 
               draw_text(
                 &fps_text,
-                &mut window_frame,
+                buffer,
                 width,
                 FPS_X_POS,
                 FPS_Y_POS,
@@ -238,10 +238,7 @@ fn main() {
               );
             }
 
-            let mut buffer = surface.buffer_mut().unwrap();
-
-            buffer.copy_from_slice(&window_frame);
-            buffer.present().unwrap();
+            pixels.render().unwrap();
 
             last_update = now;
             first_update = false;
@@ -257,7 +254,7 @@ fn main() {
 /// Draws the text into the buffer at the following x and y position.
 fn draw_text(
   text: &str,
-  buffer: &mut [u32],
+  buffer: &mut [u8],
   buffer_width: u32,
   x_pos: u32,
   y_pos: u32,
@@ -281,10 +278,10 @@ fn draw_text(
             for dy in 0..scale {
               let draw_x = character_x_pos + col * scale + dx;
               let draw_y = y_pos + row as u32 * scale + dy;
-              let buffer_index = draw_y * buffer_width + draw_x;
+              let buffer_index = (draw_y * buffer_width + draw_x) as usize * 4;
 
-              if buffer_index < buffer.len() as u32 {
-                buffer[buffer_index as usize] = color;
+              if buffer_index < buffer.len() as usize {
+                buffer[buffer_index..buffer_index + 4].copy_from_slice(&color.to_be_bytes());
               }
             }
           }
