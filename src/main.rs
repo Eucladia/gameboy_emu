@@ -19,7 +19,7 @@ use std::{
 };
 
 use winit::{
-  dpi::LogicalSize,
+  dpi::PhysicalSize,
   event::{ElementState, Event, KeyEvent, WindowEvent},
   event_loop::{ControlFlow, EventLoop},
   keyboard::{KeyCode, PhysicalKey},
@@ -32,8 +32,8 @@ const FRAME_TIME: Duration = Duration::from_micros(16_740);
 const GAMEBOY_WIDTH: u32 = 160;
 const GAMEBOY_HEIGHT: u32 = 144;
 
-const INITIAL_GAMEBOY_WIDTH: u32 = GAMEBOY_WIDTH * 3;
-const INITIAL_GAMEBOY_HEIGHT: u32 = GAMEBOY_HEIGHT * 3;
+const INITIAL_GAMEBOY_WIDTH: u32 = GAMEBOY_WIDTH * 6;
+const INITIAL_GAMEBOY_HEIGHT: u32 = GAMEBOY_HEIGHT * 6;
 
 fn main() {
   let mut args = std::env::args();
@@ -55,8 +55,8 @@ fn main() {
   let event_loop = EventLoop::new().unwrap();
   let window = Rc::new(
     WindowBuilder::new()
-      .with_min_inner_size(LogicalSize::new(GAMEBOY_WIDTH, GAMEBOY_HEIGHT))
-      .with_inner_size(LogicalSize::new(
+      .with_min_inner_size(PhysicalSize::new(GAMEBOY_WIDTH, GAMEBOY_HEIGHT))
+      .with_inner_size(PhysicalSize::new(
         INITIAL_GAMEBOY_WIDTH,
         INITIAL_GAMEBOY_HEIGHT,
       ))
