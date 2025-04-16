@@ -1662,35 +1662,25 @@ impl Cpu {
     }
   }
 
-  /// Reads 16-bits of memory from the stack, without modifying the SP.
-  fn read_stack_word(&self, hardware: &Hardware) -> u16 {
-    let lower = hardware.read_byte(self.registers.sp);
-    let upper = hardware.read_byte(self.registers.sp.wrapping_add(1));
-
-    ((upper as u16) << 8) | lower as u16
-  }
-
   /// Pops 16-bits of memory from the stack.
   fn pop_stack_word(&mut self, hardware: &Hardware) -> u16 {
-    let word = self.read_stack_word(hardware);
+    let lower = hardware.read_byte(self.registers.sp);
+    let upper = hardware.read_byte(self.registers.sp.wrapping_add(1));
+    let word = ((upper as u16) << 8) | lower as u16;
 
     self.registers.sp = self.registers.sp.wrapping_add(2);
 
     word
   }
 
-  /// Writes the 16-bit value to the stack, without modifying the SP.
-  fn write_stack_word(&self, hardware: &mut Hardware, value: u16) {
+  /// Pushes the 16-bit value on to the stack.
+  fn push_stack_word(&mut self, hardware: &mut Hardware, value: u16) {
     let upper = ((value >> 8) & 0xFF) as u8;
     let lower = (value & 0xFF) as u8;
 
     hardware.write_byte(self.registers.sp.wrapping_sub(1), upper);
     hardware.write_byte(self.registers.sp.wrapping_sub(2), lower);
-  }
 
-  /// Pushes the 16-bit value on to the stack.
-  fn push_stack_word(&mut self, hardware: &mut Hardware, value: u16) {
-    self.write_stack_word(hardware, value);
     self.registers.sp = self.registers.sp.wrapping_sub(2);
   }
 
