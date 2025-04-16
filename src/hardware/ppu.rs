@@ -178,8 +178,8 @@ impl Ppu {
     match address {
       0xFF40 => {
         // Reset the line counter when the window gets disabled
-        if is_flag_set!(self.lcdc, LcdControl::WindowDisplay as u8)
-          && !is_flag_set!(value, LcdControl::WindowDisplay as u8)
+        if is_flag_set!(self.lcdc, LcdControl::LcdDisplay as u8)
+          && !is_flag_set!(value, LcdControl::LcdDisplay as u8)
         {
           self.ly = 0;
           self.wly = 0;
