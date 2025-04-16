@@ -171,7 +171,7 @@ impl Cpu {
         self.toggle_flag(Flag::Z, false);
         self.toggle_flag(Flag::N, false);
         self.toggle_flag(Flag::H, (sp & 0x0F) as u8 + ((offset as u8) & 0x0F) > 0x0F);
-        self.toggle_flag(Flag::C, ((sp & 0xFF) + (offset & 0xFF) as u16) > 0xFF);
+        self.toggle_flag(Flag::C, ((sp & 0xFF) + (offset & 0xFF)) > 0xFF);
 
         self.clock.advance(3);
       }
@@ -1601,7 +1601,7 @@ impl Cpu {
       Register::H => self.registers.h,
       Register::L => self.registers.l,
       Register::M => {
-        let address = (self.registers.h as u16) << 8 | self.registers.l as u16;
+        let address = ((self.registers.h as u16) << 8) | (self.registers.l as u16);
 
         hardware.read_byte(address)
       }
@@ -1619,7 +1619,7 @@ impl Cpu {
       Register::H => self.registers.h = value,
       Register::L => self.registers.l = value,
       Register::M => {
-        let address = (self.registers.h as u16) << 8 | self.registers.l as u16;
+        let address = ((self.registers.h as u16) << 8) | (self.registers.l as u16);
 
         hardware.write_byte(address, value);
       }
@@ -1629,10 +1629,10 @@ impl Cpu {
   /// Reads the value of the [`RegisterPair`].
   fn read_register_pair(&self, register_pair: RegisterPair) -> u16 {
     match register_pair {
-      RegisterPair::AF => (self.registers.a as u16) << 8 | self.flags as u16,
-      RegisterPair::BC => (self.registers.b as u16) << 8 | self.registers.c as u16,
-      RegisterPair::DE => (self.registers.d as u16) << 8 | self.registers.e as u16,
-      RegisterPair::HL => (self.registers.h as u16) << 8 | self.registers.l as u16,
+      RegisterPair::AF => ((self.registers.a as u16) << 8) | (self.flags as u16),
+      RegisterPair::BC => ((self.registers.b as u16) << 8) | (self.registers.c as u16),
+      RegisterPair::DE => ((self.registers.d as u16) << 8) | (self.registers.e as u16),
+      RegisterPair::HL => ((self.registers.h as u16) << 8) | (self.registers.l as u16),
       RegisterPair::SP => self.registers.sp,
     }
   }
@@ -1707,9 +1707,9 @@ impl Cpu {
   /// Conditionally toggles the flag.
   fn toggle_flag(&mut self, flag: Flag, condition: bool) {
     if condition {
-      self.flags = add_flag!(self.flags, flag as u8);
+      add_flag!(&mut self.flags, flag as u8);
     } else {
-      self.flags = remove_flag!(self.flags, flag as u8);
+      remove_flag!(&mut self.flags, flag as u8);
     }
   }
 }

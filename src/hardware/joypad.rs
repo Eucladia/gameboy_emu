@@ -78,9 +78,9 @@ impl Joypad {
 
     // A button is pressed if its bit is set to 0
     if pressed {
-      self.pressed = remove_flag!(self.pressed, mask);
+      remove_flag!(&mut self.pressed, mask);
     } else {
-      self.pressed = add_flag!(self.pressed, mask);
+      add_flag!(&mut self.pressed, mask);
     }
 
     if self.pressed != before {

@@ -1,5 +1,4 @@
 mod emulator;
-mod error;
 mod flags;
 mod hardware;
 mod instructions;

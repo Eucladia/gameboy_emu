@@ -254,7 +254,7 @@ impl Apu {
     self.frame_sequencer_cycles += 1;
 
     if self.frame_sequencer_cycles == FRAME_SEQEUNCER_CYCLES {
-      match self.frame_sequencer_step & FRAME_SEQUENCER_STEP_COUNT - 1 {
+      match self.frame_sequencer_step & (FRAME_SEQUENCER_STEP_COUNT - 1) {
         step @ (0 | 2 | 4 | 6) => {
           // Length counters step every even step
           self.channel1.step_length_timer();

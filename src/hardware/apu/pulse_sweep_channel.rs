@@ -255,7 +255,7 @@ impl PulseSweepChannel {
     // Only take the lower 3 bits from NR14
     let high = self.nr14 & 0x07;
 
-    (high as u16) << 8 | low as u16
+    ((high as u16) << 8) | (low as u16)
   }
 
   /// Returns the frequency timer reload value.

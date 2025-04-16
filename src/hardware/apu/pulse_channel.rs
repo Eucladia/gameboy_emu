@@ -98,8 +98,6 @@ impl PulseChannel {
     DUTY_TABLE[wave_duty as usize][self.duty_step as usize] * self.amplitude
   }
 
-  /// Triggers this channel.
-
   /// Reads the channel's registers.
   pub fn read_register(&self, address: u16) -> u8 {
     match address & 0xFF {
@@ -139,6 +137,7 @@ impl PulseChannel {
     }
   }
 
+  /// Triggers this channel.
   fn trigger(&mut self) {
     self.enabled = self.is_dac_on();
 
@@ -182,7 +181,7 @@ impl PulseChannel {
     // Only take the lower 3 bits from NR14
     let high = self.nr24 & 0x07;
 
-    (high as u16) << 8 | low as u16
+    ((high as u16) << 8) | (low as u16)
   }
 
   /// Returns the frequency timer reload value.

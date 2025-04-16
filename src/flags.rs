@@ -6,7 +6,7 @@ macro_rules! is_flag_set {
 }
 
 /// Removes a flag from the number.
-macro_rules! remove_flag {
+macro_rules! unset_flag {
   ($num:expr, $mask:expr) => {
     $num & !$mask
   };
@@ -15,13 +15,29 @@ macro_rules! remove_flag {
 /// Adds a flag to the number.
 macro_rules! add_flag {
   ($num:expr, $mask:expr) => {
+    *$num |= $mask
+  };
+}
+
+/// Sets a flag in a number.
+macro_rules! set_flag {
+  ($num:expr, $mask:expr) => {
     $num | $mask
+  };
+}
+
+/// Sets a flag in a number.
+macro_rules! remove_flag {
+  ($num:expr, $mask:expr) => {
+    *$num &= !$mask
   };
 }
 
 pub(crate) use add_flag;
 pub(crate) use is_flag_set;
 pub(crate) use remove_flag;
+pub(crate) use set_flag;
+pub(crate) use unset_flag;
 
 /// The CPU flags that may get affected after executing an instruction.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]

@@ -46,7 +46,7 @@ impl NoiseChannel {
     const LSFR_WIDTH_MODE_MASK: u8 = 0b000_1000;
 
     if self.frequency_timer == 0 {
-      self.frequency_timer = self.get_frequency() * 1;
+      self.frequency_timer = self.get_frequency();
 
       // XOR the first 2 bits
       let xor = (self.lsfr & 0x01) ^ ((self.lsfr >> 1) & 0x01);
@@ -210,11 +210,5 @@ impl NoiseChannel {
 
 /// The number of ticks for the channel length timer.
 const CHANNEL_LENGTH_TIMER_TICKS: u8 = 64;
-/// The maximum frequency.
-const MAX_FREQUENCY: u16 = 2048;
-/// The multiplication factor for checking if the frequency was reached.
-const DOTS_MULTIPLIER: u16 = 4;
 /// The bitmask for checking if a channel should be triggered.
 const CHANNEL_TRIGGER_BIT_MASK: u8 = 0b1000_0000;
-/// The number of samples in waveform.
-const WAVEFORM_SAMPLE_COUNT: u8 = 8;

@@ -114,13 +114,13 @@ impl Ppu {
           self.ly = self.ly.wrapping_add(1);
 
           if self.ly == self.lyc {
-            self.stat = add_flag!(self.stat, StatFlag::Coincidence as u8);
+            add_flag!(&mut self.stat, StatFlag::Coincidence as u8);
 
             if is_flag_set!(self.stat, StatFlag::LycInterrupt as u8) {
               interrupts.request_interrupt(Interrupt::Lcd);
             }
           } else {
-            self.stat = remove_flag!(self.stat, StatFlag::Coincidence as u8);
+            remove_flag!(&mut self.stat, StatFlag::Coincidence as u8);
           }
 
           if self.ly == 144 {
@@ -142,13 +142,13 @@ impl Ppu {
           self.ly = self.ly.wrapping_add(1);
 
           if self.ly == self.lyc {
-            self.stat = add_flag!(self.stat, StatFlag::Coincidence as u8);
+            add_flag!(&mut self.stat, StatFlag::Coincidence as u8);
 
             if is_flag_set!(self.stat, StatFlag::LycInterrupt as u8) {
               interrupts.request_interrupt(Interrupt::Lcd);
             }
           } else {
-            self.stat = remove_flag!(self.stat, StatFlag::Coincidence as u8);
+            remove_flag!(&mut self.stat, StatFlag::Coincidence as u8);
           }
 
           if self.ly > 153 {
@@ -280,7 +280,7 @@ impl Ppu {
     let upper = self.read_ram(base_addr + tile_offset + row_offset + 1);
     let bit = 7 - (x % 8);
 
-    ((upper >> bit) & 1) << 1 | ((lower >> bit) & 1)
+    (((upper >> bit) & 1) << 1) | ((lower >> bit) & 1)
   }
 
   /// Fetches a sprite's pixel from the given tile index, row (0, 7 inclusive),

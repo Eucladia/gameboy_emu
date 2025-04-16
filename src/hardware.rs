@@ -51,7 +51,7 @@ impl Hardware {
   pub fn new(bytes: Vec<u8>) -> Self {
     let cartridge = match bytes[CARTRIDGE_TYPE as usize] {
       0x0 => Cartridge::RomOnly(RomOnly::new(bytes)),
-      0x01 | 0x02 | 0x03 => Cartridge::Mbc1(Mbc1::new(bytes)),
+      0x01..=0x03 => Cartridge::Mbc1(Mbc1::new(bytes)),
       b => panic!("got invalid memory cartridge type: {b:02X}"),
     };
 
