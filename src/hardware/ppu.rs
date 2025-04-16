@@ -197,8 +197,8 @@ impl Ppu {
       0xFF41 => self.stat = (value & 0b0111_1100) | self.current_mode() as u8,
       0xFF42 => self.scy = value,
       0xFF43 => self.scx = value,
-      // Writing to LY resets it
-      0xFF44 => self.ly = 0,
+      // Writes to LY are ignored
+      0xFF44 => {}
       0xFF45 => self.lyc = value,
       0xFF46 => {
         self.dma = value;
