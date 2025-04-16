@@ -7,23 +7,28 @@ mod interrupts;
 
 use emulator::Emulator;
 use flags::is_flag_set;
-use hardware::{Cpu, Hardware, joypad::Button};
+use hardware::{Cpu, Hardware, apu::AudioSample, joypad::Button};
 
-use softbuffer::{Context, Surface};
-
-use std::{
-  fs,
-  num::NonZeroU32,
-  rc::Rc,
-  time::{Duration, Instant},
+use cpal::{
+  BufferSize, SampleRate, StreamConfig,
+  traits::{DeviceTrait, HostTrait, StreamTrait},
 };
-
+use softbuffer::{Context, Surface};
 use winit::{
   dpi::PhysicalSize,
   event::{ElementState, Event, KeyEvent, WindowEvent},
   event_loop::{ControlFlow, EventLoop},
   keyboard::{KeyCode, PhysicalKey},
   window::WindowBuilder,
+};
+
+use std::{
+  collections::VecDeque,
+  fs,
+  num::NonZeroU32,
+  rc::Rc,
+  sync::{Arc, Mutex},
+  time::{Duration, Instant},
 };
 
 /// The Gameboy runs at 59.7275 frames per second.
@@ -51,6 +56,7 @@ fn main() {
   let cpu = Cpu::with_register_defaults();
   let hardware = Hardware::new(rom_bytes);
   let mut emulator = Emulator::new(cpu, hardware);
+  let audio_stream = get_audio_stream(emulator.hardware.audio_buffer());
 
   let event_loop = EventLoop::new().unwrap();
   let window = Rc::new(
@@ -243,6 +249,10 @@ fn main() {
             buffer.copy_from_slice(&window_frame);
             buffer.present().unwrap();
 
+            if first_update {
+              audio_stream.play().unwrap();
+            }
+
             last_update = now;
             first_update = false;
           }
@@ -252,6 +262,36 @@ fn main() {
       }
     })
     .unwrap();
+}
+
+fn get_audio_stream(audio_buffer: Arc<Mutex<VecDeque<AudioSample>>>) -> cpal::Stream {
+  let device = cpal::default_host().default_output_device().unwrap();
+
+  let config = StreamConfig {
+    channels: 2,
+    sample_rate: SampleRate(44_100),
+    buffer_size: BufferSize::Fixed(4096),
+  };
+
+  device
+    .build_output_stream(
+      &config,
+      move |data: &mut [f32], _| {
+        let mut buffer = audio_buffer.lock().unwrap();
+
+        for frame in data.chunks_mut(2) {
+          let AudioSample { left, right } = buffer.pop_front().unwrap_or_default();
+
+          frame[0] = left;
+          frame[1] = right;
+        }
+      },
+      move |err| {
+        eprintln!("error {:?}", err);
+      },
+      None,
+    )
+    .unwrap()
 }
 
 /// Draws the text into the buffer at the following x and y position.

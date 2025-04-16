@@ -1,9 +1,15 @@
+pub mod apu;
 pub mod cartridge;
 pub mod cpu;
 pub mod joypad;
 pub mod ppu;
 pub mod registers;
 pub mod timer;
+
+use std::{
+  collections::VecDeque,
+  sync::{Arc, Mutex},
+};
 
 pub use cpu::Cpu;
 pub use joypad::Joypad;
@@ -12,6 +18,7 @@ pub use timer::Timer;
 use crate::{
   flags::is_flag_set,
   hardware::{
+    apu::{Apu, AudioSample},
     cartridge::{Cartridge, Mbc1, RomOnly},
     joypad::Button,
     ppu::{DmaTransfer, Ppu, PpuMode},
@@ -33,6 +40,8 @@ pub struct Hardware {
   pub timer: Timer,
   /// The pixel processing unit.
   pub ppu: Ppu,
+  /// The audio processing unit.
+  pub apu: Apu,
   /// The enableed and requested interrupts.
   interrupts: Interrupts,
 }
@@ -52,6 +61,7 @@ impl Hardware {
       joypad: Joypad::new(),
       timer: Timer::new(),
       ppu: Ppu::new(),
+      apu: Apu::new(),
       interrupts: Interrupts::new(),
       cartridge,
     }
@@ -225,6 +235,15 @@ impl Hardware {
     self.ppu.step(&mut self.interrupts, cycles);
   }
 
+  /// Steps the APU with the following number of cycles.
+  pub fn step_apu(&mut self, cycles: usize) {
+    self.apu.step(cycles);
+  }
+
+  pub fn audio_buffer(&self) -> Arc<Mutex<VecDeque<AudioSample>>> {
+    self.apu.audio_buffer()
+  }
+
   /// Checks if there are any pending interrupts.
   pub fn has_pending_interrupts(&self) -> bool {
     (self.interrupts.enabled_bitfield() & self.interrupts.requested_bitfield()) != 0
@@ -258,10 +277,9 @@ impl Hardware {
       // Serial transfer
       0xFF01 | 0xFF02 => 0x0,
       0xFF04..0xFF08 => self.timer.read_register(address),
+      0xFF10..0xFF27 | 0xFF30..0xFF40 => self.apu.read_register(address),
       0xFF40..0xFF4C => self.ppu.read_register(address),
       0xFF0F => self.interrupts.requested_bitfield(),
-      // Audio stuff
-      0xFF10..0xFF27 | 0xFF30..0xFF40 => 0x00,
       _ => 0xFF,
     }
   }
@@ -273,10 +291,9 @@ impl Hardware {
       // Serial transfer
       0xFF01 | 0xFF02 => {}
       0xFF04..0xFF08 => self.timer.write_register(address, value),
+      0xFF10..0xFF27 | 0xFF30..0xFF40 => self.apu.write_register(address, value),
       0xFF40..0xFF4C => self.ppu.write_register(address, value),
       0xFF0F => self.interrupts.set_requested(value),
-      // Audio
-      0xFF10..0xFF27 | 0xFF30..0xFF40 => {}
       _ => {}
     }
   }

@@ -37,6 +37,8 @@ impl Emulator {
 
       self.hardware.step_ppu(cycles);
 
+      self.hardware.step_apu(cycles);
+
       if self.hardware.has_pending_interrupts() {
         self.cpu.handle_interrupts(&mut self.hardware);
       }

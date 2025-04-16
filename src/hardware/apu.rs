@@ -1,0 +1,329 @@
+mod noise_channel;
+mod pulse_channel;
+mod pulse_sweep_channel;
+mod wave_channel;
+
+use std::{
+  collections::VecDeque,
+  sync::{Arc, Mutex},
+};
+
+use crate::{
+  flags::is_flag_set,
+  hardware::apu::{
+    noise_channel::NoiseChannel, pulse_channel::PulseChannel,
+    pulse_sweep_channel::PulseSweepChannel, wave_channel::WaveChannel,
+  },
+};
+
+#[derive(Debug)]
+pub struct Apu {
+  channel1: PulseSweepChannel,
+  channel2: PulseChannel,
+  channel3: WaveChannel,
+  channel4: NoiseChannel,
+
+  nr50: u8,
+  nr51: u8,
+  nr52: u8,
+
+  frame_sequencer_cycles: u16,
+  frame_sequencer_step: u8,
+
+  dots: u16,
+
+  audio_buffer: Arc<Mutex<VecDeque<AudioSample>>>,
+}
+
+impl Apu {
+  pub fn new() -> Self {
+    Self {
+      channel1: PulseSweepChannel::new(),
+      channel2: PulseChannel::new(),
+      channel3: WaveChannel::new(),
+      channel4: NoiseChannel::new(),
+
+      nr50: 0x77,
+      nr51: 0xF3,
+      nr52: 0x8F,
+
+      frame_sequencer_cycles: 0,
+      frame_sequencer_step: 0,
+
+      dots: 0,
+
+      audio_buffer: Arc::new(Mutex::new(VecDeque::new())),
+    }
+  }
+
+  /// Steps the APU.
+  pub fn step(&mut self, cycles: usize) {
+    for _ in 0..cycles {
+      self.channel1.step();
+      self.channel2.step();
+      self.channel3.step();
+      self.channel4.step();
+
+      self.step_frame_sequencer();
+
+      self.dots += 1;
+    }
+
+    if self.dots >= SAMPLES_PER_CYCLE {
+      self.dots -= SAMPLES_PER_CYCLE;
+
+      self.push_audio_sample();
+    }
+  }
+
+  /// Reads the APU's registers.
+  pub fn read_register(&self, address: u16) -> u8 {
+    match address {
+      // Sound channel 1
+      0xFF10..0xFF15 => self.channel1.read_register(address),
+      // Undocumented
+      0xFF15 => 0xFF,
+      // Sound channel 2
+      0xFF16..0xFF1A => self.channel2.read_register(address),
+      // Sound channel 3
+      0xFF1A..0xFF1F | 0xFF30..0xFF40 => self.channel3.read_register(address),
+      // Undocumented
+      0xFF1F => 0xFF,
+      // Sound channel 4
+      0xFF20..0xFF24 => self.channel4.read_register(address),
+
+      // Global registers
+      0xFF24 => self.nr50,
+      0xFF25 => self.nr51,
+      0xFF26 => self.nr52,
+
+      x => unreachable!("tried to read {:02X}", x),
+    }
+  }
+
+  /// Writes to the APU's registers.
+  pub fn write_register(&mut self, address: u16, value: u8) {
+    // Only wave RAM and the master control are writable when the APU is disabled.
+    match address {
+      // Sound channel 1
+      0xFF10..0xFF15 => {
+        if self.is_enabled() {
+          self.channel1.write_register(address, value)
+        }
+      }
+      // Undocumented
+      0xFF15 => {}
+      // Sound channel 2
+      0xFF16..0xFF1A => {
+        if self.is_enabled() {
+          self.channel2.write_register(address, value)
+        }
+      }
+      // Sound channel 3
+      0xFF1A..0xFF1F => {
+        if self.is_enabled() {
+          self.channel3.write_register(address, value)
+        }
+      }
+      0xFF30..0xFF40 => self.channel3.write_register(address, value),
+      // Undocumented
+      0xFF1F => {}
+      // Sound channel 4
+      0xFF20..0xFF24 => {
+        if self.is_enabled() {
+          self.channel4.write_register(address, value)
+        }
+      }
+
+      // Global registers
+      0xFF24 => {
+        if self.is_enabled() {
+          self.nr50 = value
+        }
+      }
+      0xFF25 => {
+        if self.is_enabled() {
+          self.nr51 = value
+        }
+      }
+      0xFF26 => {
+        const APU_ENABLE_MASK: u8 = 0b1000_0000;
+
+        // The APU is being turned off, so we need to reset the registers
+        if self.is_enabled() && !is_flag_set!(value, APU_ENABLE_MASK) {
+          // Clear channel 1's registers
+          self.channel1.write_register(0xFF10, 0);
+          self.channel1.write_register(0xFF11, 0);
+          self.channel1.write_register(0xFF12, 0);
+          self.channel1.write_register(0xFF13, 0);
+          self.channel1.write_register(0xFF14, 0);
+
+          // Clear channel 2's registers
+          self.channel2.write_register(0xFF16, 0);
+          self.channel2.write_register(0xFF17, 0);
+          self.channel2.write_register(0xFF18, 0);
+          self.channel2.write_register(0xFF19, 0);
+
+          // Clear channel 3's registers
+          self.channel3.write_register(0xFF1A, 0);
+          self.channel3.write_register(0xFF1B, 0);
+          self.channel3.write_register(0xFF1C, 0);
+          self.channel3.write_register(0xFF1D, 0);
+          self.channel3.write_register(0xFF1E, 0);
+
+          // Clear channel 4's registers
+          self.channel4.write_register(0xFF21, 0);
+          self.channel4.write_register(0xFF22, 0);
+          self.channel4.write_register(0xFF23, 0);
+        }
+
+        self.nr52 = value
+      }
+
+      x => unreachable!("tried to write {:02X}", x),
+    }
+  }
+
+  /// Returns the audio buffer.
+  pub fn audio_buffer(&self) -> Arc<Mutex<VecDeque<AudioSample>>> {
+    Arc::clone(&self.audio_buffer)
+  }
+
+  /// Pushes a new audio channel into the audio buffer.
+  fn push_audio_sample(&self) {
+    const MASTER_VOLUME: f32 = 0.5;
+
+    let ch1 = self.channel1.get_sample();
+    let ch2 = self.channel2.get_sample();
+    let ch3 = self.channel3.get_sample();
+    let ch4 = self.channel4.get_sample();
+
+    // The system device channel outputs
+    let mut left = 0.0;
+    let mut right = 0.0;
+
+    // Selectively add the sound channel outputs to the left and right channels
+    if is_flag_set!(self.nr51, SoundPanningFlags::Channel1Right as u8) {
+      right += ch1 as f32 / 15.0;
+    }
+    if is_flag_set!(self.nr51, SoundPanningFlags::Channel2Right as u8) {
+      right += ch2 as f32 / 15.0;
+    }
+    if is_flag_set!(self.nr51, SoundPanningFlags::Channel3Right as u8) {
+      right += ch3 as f32 / 15.0;
+    }
+    if is_flag_set!(self.nr51, SoundPanningFlags::Channel4Right as u8) {
+      right += ch4 as f32 / 15.0;
+    }
+    if is_flag_set!(self.nr51, SoundPanningFlags::Channel1Left as u8) {
+      left += ch1 as f32 / 15.0;
+    }
+    if is_flag_set!(self.nr51, SoundPanningFlags::Channel2Left as u8) {
+      left += ch2 as f32 / 15.0;
+    }
+    if is_flag_set!(self.nr51, SoundPanningFlags::Channel3Left as u8) {
+      left += ch3 as f32 / 15.0;
+    }
+    if is_flag_set!(self.nr51, SoundPanningFlags::Channel4Left as u8) {
+      left += ch4 as f32 / 15.0;
+    }
+
+    // Apply volume scaling for each output channel
+    let left_volume = (self.nr50 >> 4) & 0x07;
+    let right_volume = self.nr50 & 0x07;
+
+    // Add 1 because the amplifier treats never mutes the output
+    left *= (left_volume + 1) as f32 / 8.0;
+    right *= (right_volume + 1) as f32 / 8.0;
+
+    // Scale by the master volume and normalize the outputs
+    let volume_scale = MASTER_VOLUME / 4.0;
+
+    left *= volume_scale;
+    right *= volume_scale;
+
+    self
+      .audio_buffer
+      .lock()
+      .unwrap()
+      .push_back(AudioSample { left, right });
+  }
+
+  /// Steps the frame sequencer.
+  fn step_frame_sequencer(&mut self) {
+    self.frame_sequencer_cycles += 1;
+
+    if self.frame_sequencer_cycles == FRAME_SEQEUNCER_CYCLES {
+      match self.frame_sequencer_step & FRAME_SEQUENCER_STEP_COUNT - 1 {
+        step @ (0 | 2 | 4 | 6) => {
+          // Length counters step every even step
+          self.channel1.step_length_timer();
+          self.channel2.step_length_timer();
+          self.channel3.step_length_timer();
+          self.channel4.step_length_timer();
+
+          // Pulse channel steps its sweep every 2nd and 6th step
+          if step == 2 || step == 6 {
+            self.channel1.step_sweep();
+          }
+        }
+
+        // Do nothing on 1, 3, and 5
+        1 | 3 | 5 => {}
+
+        // Step the envelopes
+        7 => {
+          self.channel1.step_envelope();
+          self.channel2.step_envelope();
+          self.channel4.step_envelope();
+        }
+
+        _ => unreachable!(),
+      }
+
+      self.frame_sequencer_cycles = 0;
+      self.frame_sequencer_step = (self.frame_sequencer_step + 1) % FRAME_SEQUENCER_STEP_COUNT;
+    }
+  }
+
+  /// Returns whether the APU is enabled.
+  fn is_enabled(&self) -> bool {
+    is_flag_set!(self.nr52, APU_ENABLE_MASK)
+  }
+}
+
+/// An audio sample with a left and right channel.
+#[derive(Debug, Default, Clone)]
+pub struct AudioSample {
+  /// The left sound channel.
+  pub left: f32,
+  /// The right sound channel.
+  pub right: f32,
+}
+
+/// The audio channels' outputs.
+#[derive(Debug, Clone, Copy)]
+enum SoundPanningFlags {
+  Channel1Right = 1 << 0,
+  Channel2Right = 1 << 1,
+  Channel3Right = 1 << 2,
+  Channel4Right = 1 << 3,
+
+  Channel1Left = 1 << 4,
+  Channel2Left = 1 << 5,
+  Channel3Left = 1 << 6,
+  Channel4Left = 1 << 7,
+}
+
+/// The samples per cycle.
+const SAMPLES_PER_CYCLE: u16 = (GAMEBOY_CLOCK_SPEED / SAMPLE_RATE) as u16;
+/// The Gameboy's clock speed.
+const GAMEBOY_CLOCK_SPEED: u32 = 4_194_304;
+/// The sample rate.
+const SAMPLE_RATE: u32 = 44_100;
+/// The number of cycles per frame sequencer step.
+const FRAME_SEQEUNCER_CYCLES: u16 = 8192;
+/// The step count for the frame sequenecer.
+const FRAME_SEQUENCER_STEP_COUNT: u8 = 8;
+/// The bitmask for checking whether the APU is enabled.
+const APU_ENABLE_MASK: u8 = 0b1000_0000;
