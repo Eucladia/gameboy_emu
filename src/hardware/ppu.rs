@@ -183,6 +183,8 @@ impl Ppu {
         {
           self.ly = 0;
           self.wly = 0;
+
+          remove_flag!(&mut self.stat, StatFlag::Coincidence as u8);
         }
 
         self.lcdc = value;
