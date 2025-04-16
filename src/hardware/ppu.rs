@@ -83,6 +83,19 @@ impl Ppu {
   pub fn step(&mut self, interrupts: &mut Interrupts, cycles: usize) {
     self.counter += cycles;
 
+    // `LY==LYC` needs to be checked every cycle.
+    if self.ly == self.lyc {
+      if !is_flag_set!(self.stat, StatFlag::Coincidence as u8) {
+        add_flag!(&mut self.stat, StatFlag::Coincidence as u8);
+
+        if is_flag_set!(self.stat, StatFlag::LycInterrupt as u8) {
+          interrupts.request_interrupt(Interrupt::Lcd);
+        }
+      }
+    } else {
+      remove_flag!(&mut self.stat, StatFlag::Coincidence as u8);
+    }
+
     match self.current_mode() {
       // OAM scan lasts for 80 cycles
       PpuMode::OamScan => {
@@ -113,16 +126,6 @@ impl Ppu {
           self.counter -= 204;
           self.ly = self.ly.wrapping_add(1);
 
-          if self.ly == self.lyc {
-            add_flag!(&mut self.stat, StatFlag::Coincidence as u8);
-
-            if is_flag_set!(self.stat, StatFlag::LycInterrupt as u8) {
-              interrupts.request_interrupt(Interrupt::Lcd);
-            }
-          } else {
-            remove_flag!(&mut self.stat, StatFlag::Coincidence as u8);
-          }
-
           if self.ly == 144 {
             interrupts.request_interrupt(Interrupt::VBlank);
             self.set_current_mode(PpuMode::VBlank);
@@ -140,16 +143,6 @@ impl Ppu {
         if self.counter >= 456 {
           self.counter -= 456;
           self.ly = self.ly.wrapping_add(1);
-
-          if self.ly == self.lyc {
-            add_flag!(&mut self.stat, StatFlag::Coincidence as u8);
-
-            if is_flag_set!(self.stat, StatFlag::LycInterrupt as u8) {
-              interrupts.request_interrupt(Interrupt::Lcd);
-            }
-          } else {
-            remove_flag!(&mut self.stat, StatFlag::Coincidence as u8);
-          }
 
           if self.ly > 153 {
             self.ly = 0;
