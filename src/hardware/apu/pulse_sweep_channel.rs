@@ -102,7 +102,7 @@ impl PulseSweepChannel {
     self.length_timer -= 1;
 
     if self.length_timer == 0 {
-      self.disable();
+      self.enabled = false;
     }
   }
 
@@ -149,7 +149,7 @@ impl PulseSweepChannel {
         self.nr12 = value;
 
         if !self.is_dac_on() {
-          self.disable();
+          self.enabled = false;
         }
       }
       0x13 => self.nr13 = value,
@@ -162,6 +162,11 @@ impl PulseSweepChannel {
       }
       _ => unreachable!(),
     }
+  }
+
+  /// Returns whether this sound channel is enabled.
+  pub fn enabled(&self) -> bool {
+    self.enabled
   }
 
   /// Triggers this channel.
@@ -193,28 +198,9 @@ impl PulseSweepChannel {
       let new_freq = self.get_next_sweep_frequency();
 
       if new_freq > 0x07FF {
-        self.disable();
+        self.enabled = false;
       }
     }
-  }
-
-  /// Reloads the length timer.
-  fn reload_length_timer(&mut self) {
-    // The length timer is stored in the first 6 bits
-    let length_timer = self.nr11 & 0b0011_1111;
-
-    self.length_timer = CHANNEL_LENGTH_TIMER_TICKS - length_timer
-  }
-
-  /// Returns whether this channel's DAC is enabled.
-  fn is_dac_on(&self) -> bool {
-    // Channel 1's DAC is disabled if bits 3-7 are all 0
-    (self.nr12 >> 3) != 0
-  }
-
-  /// Disables this sound channel.
-  fn disable(&mut self) {
-    self.enabled = false;
   }
 
   /// Updates the envelope timer.
@@ -249,20 +235,6 @@ impl PulseSweepChannel {
     }
   }
 
-  /// Returns the raw 11-bit period value of the channel.
-  fn get_period(&self) -> u16 {
-    let low = self.nr13;
-    // Only take the lower 3 bits from NR14
-    let high = self.nr14 & 0x07;
-
-    ((high as u16) << 8) | (low as u16)
-  }
-
-  /// Returns the frequency timer reload value.
-  fn frequency_timer_reload(&self) -> u16 {
-    MAX_FREQUENCY - self.get_period()
-  }
-
   /// Gets the next frequency value.
   fn get_next_sweep_frequency(&self) -> u16 {
     const SWEEP_DIRECTION_MASK: u8 = 0b0000_1000;
@@ -283,7 +255,7 @@ impl PulseSweepChannel {
 
     // Turn off the channel if the new frequency would overflow
     if new_freq > 0x7FF {
-      self.disable();
+      self.enabled = false;
 
       return;
     }
@@ -297,9 +269,37 @@ impl PulseSweepChannel {
       let new_freq = self.get_next_sweep_frequency();
 
       if new_freq > 0x7FF {
-        self.disable();
+        self.enabled = false;
       }
     }
+  }
+
+  /// Returns the raw 11-bit period value of the channel.
+  fn get_period(&self) -> u16 {
+    let low = self.nr13;
+    // Only take the lower 3 bits from NR14
+    let high = self.nr14 & 0x07;
+
+    ((high as u16) << 8) | (low as u16)
+  }
+
+  /// Returns the frequency timer reload value.
+  fn frequency_timer_reload(&self) -> u16 {
+    MAX_FREQUENCY - self.get_period()
+  }
+
+  /// Reloads the length timer.
+  fn reload_length_timer(&mut self) {
+    // The length timer is stored in the first 6 bits
+    let length_timer = self.nr11 & 0b0011_1111;
+
+    self.length_timer = CHANNEL_LENGTH_TIMER_TICKS - length_timer
+  }
+
+  /// Returns whether this channel's DAC is enabled.
+  fn is_dac_on(&self) -> bool {
+    // Channel 1's DAC is disabled if bits 3-7 are all 0
+    (self.nr12 >> 3) != 0
   }
 }
 

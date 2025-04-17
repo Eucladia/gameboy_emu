@@ -9,7 +9,7 @@ use std::{
 };
 
 use crate::{
-  flags::is_flag_set,
+  flags::{add_flag, is_flag_set},
   hardware::apu::{
     noise_channel::NoiseChannel, pulse_channel::PulseChannel,
     pulse_sweep_channel::PulseSweepChannel, wave_channel::WaveChannel,
@@ -95,7 +95,7 @@ impl Apu {
       // Global registers
       0xFF24 => self.nr50,
       0xFF25 => self.nr51,
-      0xFF26 => self.nr52 | 0b0111_0000,
+      0xFF26 => self.nr52 | self.enabled_channels() | 0b0111_0000,
 
       x => unreachable!("tried to read {:02X}", x),
     }
@@ -295,6 +295,29 @@ impl Apu {
   fn is_enabled(&self) -> bool {
     is_flag_set!(self.nr52, APU_ENABLE_MASK)
   }
+
+  /// Returns a bitfield of the enabled sound channels.
+  fn enabled_channels(&self) -> u8 {
+    let mut bitfield = 0;
+
+    if self.channel1.enabled() {
+      add_flag!(&mut bitfield, EnabledChannels::Channel1 as u8);
+    }
+
+    if self.channel2.enabled() {
+      add_flag!(&mut bitfield, EnabledChannels::Channel2 as u8);
+    }
+
+    if self.channel3.enabled() {
+      add_flag!(&mut bitfield, EnabledChannels::Channel3 as u8);
+    }
+
+    if self.channel4.enabled() {
+      add_flag!(&mut bitfield, EnabledChannels::Channel4 as u8);
+    }
+
+    bitfield
+  }
 }
 
 /// An audio sample with a left and right channel.
@@ -308,6 +331,7 @@ pub struct AudioSample {
 
 /// The audio channels' outputs.
 #[derive(Debug, Clone, Copy)]
+#[repr(u8)]
 enum SoundPanningFlags {
   Channel1Right = 1 << 0,
   Channel2Right = 1 << 1,
@@ -318,6 +342,16 @@ enum SoundPanningFlags {
   Channel2Left = 1 << 5,
   Channel3Left = 1 << 6,
   Channel4Left = 1 << 7,
+}
+
+/// The enabled channels for the lower nibble of the NR52 register.
+#[derive(Debug, Clone, Copy)]
+#[repr(u8)]
+enum EnabledChannels {
+  Channel1 = 1 << 0,
+  Channel2 = 1 << 1,
+  Channel3 = 1 << 2,
+  Channel4 = 1 << 3,
 }
 
 /// The samples per cycle.

@@ -88,7 +88,7 @@ impl NoiseChannel {
     self.length_timer -= 1;
 
     if self.length_timer == 0 {
-      self.disable();
+      self.enabled = false;
     }
   }
 
@@ -115,7 +115,7 @@ impl NoiseChannel {
         self.nr42 = value;
 
         if !self.is_dac_on() {
-          self.disable();
+          self.enabled = false;
         }
       }
       0x22 => self.nr43 = value,
@@ -142,6 +142,11 @@ impl NoiseChannel {
     } else {
       0
     }
+  }
+
+  /// Returns whether this sound channel is enabled.
+  pub fn enabled(&self) -> bool {
+    self.enabled
   }
 
   /// Triggers this sound channel.
@@ -194,11 +199,6 @@ impl NoiseChannel {
     }
 
     clock_divider << clock_shift
-  }
-
-  /// Disables this sound channel.
-  fn disable(&mut self) {
-    self.enabled = false;
   }
 
   /// Returns whether this channel's DAC is enabled.

@@ -62,7 +62,7 @@ impl WaveChannel {
     self.length_timer -= 1;
 
     if self.length_timer == 0 {
-      self.disable();
+      self.enabled = false;
     }
   }
 
@@ -93,7 +93,7 @@ impl WaveChannel {
         self.nr30 = value;
 
         if !self.is_dac_on() {
-          self.disable();
+          self.enabled = false;
         }
       }
       0x1B => {
@@ -142,6 +142,11 @@ impl WaveChannel {
     }
   }
 
+  /// Returns whether this sound channel is enabled.
+  pub fn enabled(&self) -> bool {
+    self.enabled
+  }
+
   /// Triggers this channel.
   fn trigger(&mut self) {
     self.enabled = self.is_dac_on();
@@ -178,11 +183,6 @@ impl WaveChannel {
   /// Reloads the length timer.
   fn reload_length_timer(&mut self) {
     self.length_timer = CHANNEL_LENGTH_TIMER_TICKS - self.nr31 as u16;
-  }
-
-  /// Disables this sound channel.
-  fn disable(&mut self) {
-    self.enabled = false;
   }
 }
 

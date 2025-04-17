@@ -61,7 +61,7 @@ impl PulseChannel {
     self.length_timer -= 1;
 
     if self.length_timer == 0 {
-      self.disable();
+      self.enabled = false;
     }
   }
 
@@ -121,7 +121,7 @@ impl PulseChannel {
         self.nr22 = value;
 
         if !self.is_dac_on() {
-          self.disable();
+          self.enabled = false;
         }
       }
       0x18 => self.nr23 = value,
@@ -135,6 +135,11 @@ impl PulseChannel {
 
       _ => unreachable!(),
     }
+  }
+
+  /// Returns whether this sound channel is enabled.
+  pub fn enabled(&self) -> bool {
+    self.enabled
   }
 
   /// Triggers this channel.
@@ -193,11 +198,6 @@ impl PulseChannel {
   fn is_dac_on(&self) -> bool {
     // Channel 2's DAC is disabled if bits 3-7 are all 0
     (self.nr22 >> 3) != 0
-  }
-
-  /// Disables this sound channel.
-  fn disable(&mut self) {
-    self.enabled = false;
   }
 }
 
