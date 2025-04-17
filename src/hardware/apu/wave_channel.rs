@@ -74,7 +74,7 @@ impl WaveChannel {
       0x1C => self.nr32 | 0x9F,
       0x1D => 0xFF,
       0x1E => self.nr34 | 0xBF,
-      0x30..=0x3F => {
+      0x30..0x40 => {
         if self.enabled {
           0xFF
         } else {
@@ -109,7 +109,7 @@ impl WaveChannel {
           self.trigger();
         }
       }
-      0x30..=0x3F => self.wave_ram[address as usize - 0xFF30] = value,
+      0x30..0x40 => self.wave_ram[address as usize - 0xFF30] = value,
 
       _ => unreachable!(),
     }
