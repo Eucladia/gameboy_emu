@@ -101,10 +101,10 @@ impl PulseChannel {
   /// Reads the channel's registers.
   pub fn read_register(&self, address: u16) -> u8 {
     match address & 0xFF {
-      0xFF16 => self.nr21 | 0x3F,
-      0xFF17 => self.nr22,
-      0xFF18 => 0xFF,
-      0xFF19 => self.nr24 | 0xBF,
+      0x16 => self.nr21 | 0x3F,
+      0x17 => self.nr22,
+      0x18 => 0xFF,
+      0x19 => self.nr24 | 0xBF,
 
       _ => unreachable!(),
     }

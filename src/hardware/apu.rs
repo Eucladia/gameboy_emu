@@ -95,7 +95,7 @@ impl Apu {
       // Global registers
       0xFF24 => self.nr50,
       0xFF25 => self.nr51,
-      0xFF26 => self.nr52,
+      0xFF26 => self.nr52 | 0b0111_0000,
 
       x => unreachable!("tried to read {:02X}", x),
     }
@@ -175,9 +175,14 @@ impl Apu {
           self.channel4.write_register(0xFF21, 0);
           self.channel4.write_register(0xFF22, 0);
           self.channel4.write_register(0xFF23, 0);
+
+          // Clear global registers
+          self.nr50 = 0;
+          self.nr51 = 0;
         }
 
-        self.nr52 = value
+        // Only keep the MSB since the lower nibble is read-only
+        self.nr52 = value & 0x80;
       }
 
       x => unreachable!("tried to write {:02X}", x),
