@@ -20,7 +20,7 @@ use crate::{
   hardware::{
     apu::{Apu, AudioSample},
     cartridge::{Cartridge, Mbc1, RomOnly},
-    joypad::Button,
+    joypad::{Button, ButtonAction},
     ppu::{DmaTransfer, Ppu, PpuMode},
   },
   interrupts::{Interrupt, Interrupts},
@@ -218,11 +218,11 @@ impl Hardware {
     }
   }
 
-  /// Presses or releases a [`Button`].
-  pub fn update_button(&mut self, button: Button, pressed: bool) {
+  /// Updates the joypad's button state for the [`Button`].
+  pub fn update_button(&mut self, button: Button, button_state: ButtonAction) {
     self
       .joypad
-      .update_button_state(&mut self.interrupts, button, pressed);
+      .update_button_state(&mut self.interrupts, button, button_state);
   }
 
   /// Steps the timer with the following number of cycles.

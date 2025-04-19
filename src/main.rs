@@ -9,7 +9,7 @@ use flags::is_flag_set;
 use hardware::{
   Cpu, Hardware,
   apu::{Apu, AudioSample},
-  joypad::Button,
+  joypad::{Button, ButtonAction},
 };
 
 use cpal::{
@@ -159,9 +159,12 @@ fn main() {
           }
           key => {
             if let Some(gb_button) = convert_button(&key) {
-              emulator
-                .hardware
-                .update_button(gb_button, matches!(state, ElementState::Pressed))
+              let button_action = match state {
+                ElementState::Pressed => ButtonAction::Pressed,
+                ElementState::Released => ButtonAction::Released,
+              };
+
+              emulator.hardware.update_button(gb_button, button_action)
             }
           }
         },

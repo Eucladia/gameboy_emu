@@ -66,25 +66,33 @@ impl Joypad {
     self.button_group = value & 0b11_0000;
   }
 
-  /// Updates the button's state, requesting an interrupt if a button was pressed or released.
+  /// Updates the button's state.
   pub fn update_button_state(
     &mut self,
     interrupts: &mut Interrupts,
     button: Button,
-    pressed: bool,
+    button_state: ButtonAction,
   ) {
     let before = self.pressed;
     let mask = button as u8;
 
-    // A button is pressed if its bit is set to 0
-    if pressed {
-      remove_flag!(&mut self.pressed, mask);
-    } else {
-      add_flag!(&mut self.pressed, mask);
+    match button_state {
+      // A button is pressed if its bit is set to 0
+      ButtonAction::Pressed => remove_flag!(&mut self.pressed, mask),
+      ButtonAction::Released => add_flag!(&mut self.pressed, mask),
     }
 
     if self.pressed != before {
       interrupts.request_interrupt(Interrupt::Joypad);
     }
   }
+}
+
+/// A button action.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ButtonAction {
+  /// The button was pressed.
+  Pressed,
+  /// The button was released.
+  Released,
 }
