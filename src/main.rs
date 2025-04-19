@@ -230,7 +230,7 @@ fn main() {
               const FPS_Y_POS: u32 = 2;
               const FPS_TEXT_COLOR: u32 = 0x00FF0000;
 
-              let fps_text = format!("FPS: {:.4}", fps);
+              let fps_text = format!("FPS: {:.1}", fps);
 
               draw_text(
                 &fps_text,
