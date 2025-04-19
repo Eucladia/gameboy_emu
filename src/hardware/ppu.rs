@@ -2,7 +2,7 @@ use crate::{
   flags::{add_flag, is_flag_set, remove_flag},
   interrupts::{Interrupt, Interrupts},
 };
-use smallvec::SmallVec;
+use arrayvec::ArrayVec;
 
 /// The pixel processing unit.
 #[derive(Debug)]
@@ -391,7 +391,7 @@ impl Ppu {
       8
     };
 
-    let mut sprites = SmallVec::<[SpriteEntry; MAX_SCANLINE_SPRITES]>::new();
+    let mut sprites = ArrayVec::<SpriteEntry, MAX_SCANLINE_SPRITES>::new();
 
     for chunk in self.oam.chunks_exact(4) {
       if sprites.len() >= MAX_SCANLINE_SPRITES {
