@@ -53,9 +53,7 @@ impl WaveChannel {
 
   /// Steps this channel's length timer.
   pub fn step_length_timer(&mut self) {
-    const LENGTH_ENABLE_MASK: u8 = 0b0100_0000;
-
-    if !is_flag_set!(self.nr34, LENGTH_ENABLE_MASK) || self.length_timer == 0 {
+    if !is_flag_set!(self.nr34, TIMER_LENGTH_ENABLE_MASK) || self.length_timer == 0 {
       return;
     }
 
@@ -87,7 +85,7 @@ impl WaveChannel {
   }
 
   /// Writes to the channel's registers.
-  pub fn write_register(&mut self, address: u16, value: u8) {
+  pub fn write_register(&mut self, address: u16, value: u8, frame_step: u8) {
     match address & 0xFF {
       0x1A => {
         self.nr30 = value;
@@ -103,10 +101,48 @@ impl WaveChannel {
       0x1C => self.nr32 = value,
       0x1D => self.nr33 = value,
       0x1E => {
+        let prev_length_enabled = is_flag_set!(self.nr34, TIMER_LENGTH_ENABLE_MASK);
+        let curr_length_enabled = is_flag_set!(value, TIMER_LENGTH_ENABLE_MASK);
+        let should_trigger = is_flag_set!(value, CHANNEL_TRIGGER_MASK);
+
         self.nr34 = value;
 
-        if is_flag_set!(value, CHANNEL_TRIGGER_BIT_MASK) {
+        // The timer's length normally only gets clocked on even frame sequencer steps.
+        // However, there are edge cases when this step is odd.
+        let will_clock_length = frame_step & 1 == 0;
+
+        // There is an edge case when there was a falling edge for the length enable
+        // and the length counter isn't 0.
+        //
+        // When these conditions are met, the length gets clocked. If the clock caused
+        // it to be 0, then the channel gets disabled as well.
+        if !prev_length_enabled
+          && curr_length_enabled
+          && !will_clock_length
+          && self.length_timer > 0
+        {
+          self.length_timer -= 1;
+
+          if self.length_timer == 0 && !should_trigger {
+            self.enabled = false;
+          }
+        }
+
+        let old_length = self.length_timer;
+
+        if should_trigger {
           self.trigger();
+        }
+
+        let timer_reloaded = old_length == 0 && self.length_timer == MAX_CHANNEL_TIMER_LENGTH;
+
+        // There is another edge case when the length counter gets reloaded. That is, that
+        // the length ends up being clocked.
+        //
+        // NOTE: The first edge case can cause this edge case to occur, so it's important
+        // that we handle this edge case separately *after* calling `trigger`.
+        if curr_length_enabled && timer_reloaded && !will_clock_length {
+          self.length_timer -= 1;
         }
       }
       0x30..0x40 => self.wave_ram[address as usize - 0xFF30] = value,
@@ -152,7 +188,7 @@ impl WaveChannel {
     self.enabled = self.is_dac_on();
 
     if self.length_timer == 0 {
-      self.length_timer = CHANNEL_LENGTH_TIMER_TICKS;
+      self.length_timer = MAX_CHANNEL_TIMER_LENGTH;
     }
 
     self.frequency_timer = self.frequency_timer_reload() * DOTS_MULTIPLIER;
@@ -182,17 +218,19 @@ impl WaveChannel {
 
   /// Reloads the length timer.
   fn reload_length_timer(&mut self) {
-    self.length_timer = CHANNEL_LENGTH_TIMER_TICKS - self.nr31 as u16;
+    self.length_timer = MAX_CHANNEL_TIMER_LENGTH - self.nr31 as u16;
   }
 }
 
 /// The number of ticks for the channel length timer.
-const CHANNEL_LENGTH_TIMER_TICKS: u16 = 0b0000_0001_0000_0000;
+const MAX_CHANNEL_TIMER_LENGTH: u16 = 256;
 /// The maximum frequency.
 const MAX_FREQUENCY: u16 = 2048;
 /// The multiplication factor for checking if the frequency was reached.
 const DOTS_MULTIPLIER: u16 = 2;
 /// The bitmask for checking if a channel should be triggered.
-const CHANNEL_TRIGGER_BIT_MASK: u8 = 0b1000_0000;
+const CHANNEL_TRIGGER_MASK: u8 = 0b1000_0000;
 /// The number of samples in waveform.
 const WAVEFORM_SAMPLE_COUNT: u8 = 32;
+/// The bitmask for enabling the length timer.
+const TIMER_LENGTH_ENABLE_MASK: u8 = 0b0100_0000;

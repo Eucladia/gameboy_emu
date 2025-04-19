@@ -108,7 +108,9 @@ impl Apu {
       // Sound channel 1
       0xFF10..0xFF15 => {
         if self.is_enabled() {
-          self.channel1.write_register(address, value)
+          self
+            .channel1
+            .write_register(address, value, self.frame_sequencer_step)
         }
       }
       // Undocumented
@@ -116,22 +118,30 @@ impl Apu {
       // Sound channel 2
       0xFF16..0xFF1A => {
         if self.is_enabled() {
-          self.channel2.write_register(address, value)
+          self
+            .channel2
+            .write_register(address, value, self.frame_sequencer_step)
         }
       }
       // Sound channel 3
       0xFF1A..0xFF1F => {
         if self.is_enabled() {
-          self.channel3.write_register(address, value)
+          self
+            .channel3
+            .write_register(address, value, self.frame_sequencer_step)
         }
       }
-      0xFF30..0xFF40 => self.channel3.write_register(address, value),
+      0xFF30..0xFF40 => self
+        .channel3
+        .write_register(address, value, self.frame_sequencer_step),
       // Undocumented
       0xFF1F => {}
       // Sound channel 4
       0xFF20..0xFF24 => {
         if self.is_enabled() {
-          self.channel4.write_register(address, value)
+          self
+            .channel4
+            .write_register(address, value, self.frame_sequencer_step)
         }
       }
 
@@ -152,29 +162,63 @@ impl Apu {
         // The APU is being turned off, so we need to reset the registers
         if self.is_enabled() && !is_flag_set!(value, APU_ENABLE_MASK) {
           // Clear channel 1's registers
-          self.channel1.write_register(0xFF10, 0);
-          self.channel1.write_register(0xFF11, 0);
-          self.channel1.write_register(0xFF12, 0);
-          self.channel1.write_register(0xFF13, 0);
-          self.channel1.write_register(0xFF14, 0);
+          self
+            .channel1
+            .write_register(0xFF10, 0, self.frame_sequencer_step);
+          self
+            .channel1
+            .write_register(0xFF11, 0, self.frame_sequencer_step);
+          self
+            .channel1
+            .write_register(0xFF12, 0, self.frame_sequencer_step);
+          self
+            .channel1
+            .write_register(0xFF13, 0, self.frame_sequencer_step);
+          self
+            .channel1
+            .write_register(0xFF14, 0, self.frame_sequencer_step);
 
           // Clear channel 2's registers
-          self.channel2.write_register(0xFF16, 0);
-          self.channel2.write_register(0xFF17, 0);
-          self.channel2.write_register(0xFF18, 0);
-          self.channel2.write_register(0xFF19, 0);
+          self
+            .channel2
+            .write_register(0xFF16, 0, self.frame_sequencer_step);
+          self
+            .channel2
+            .write_register(0xFF17, 0, self.frame_sequencer_step);
+          self
+            .channel2
+            .write_register(0xFF18, 0, self.frame_sequencer_step);
+          self
+            .channel2
+            .write_register(0xFF19, 0, self.frame_sequencer_step);
 
           // Clear channel 3's registers
-          self.channel3.write_register(0xFF1A, 0);
-          self.channel3.write_register(0xFF1B, 0);
-          self.channel3.write_register(0xFF1C, 0);
-          self.channel3.write_register(0xFF1D, 0);
-          self.channel3.write_register(0xFF1E, 0);
+          self
+            .channel3
+            .write_register(0xFF1A, 0, self.frame_sequencer_step);
+          self
+            .channel3
+            .write_register(0xFF1B, 0, self.frame_sequencer_step);
+          self
+            .channel3
+            .write_register(0xFF1C, 0, self.frame_sequencer_step);
+          self
+            .channel3
+            .write_register(0xFF1D, 0, self.frame_sequencer_step);
+          self
+            .channel3
+            .write_register(0xFF1E, 0, self.frame_sequencer_step);
 
           // Clear channel 4's registers
-          self.channel4.write_register(0xFF21, 0);
-          self.channel4.write_register(0xFF22, 0);
-          self.channel4.write_register(0xFF23, 0);
+          self
+            .channel4
+            .write_register(0xFF21, 0, self.frame_sequencer_step);
+          self
+            .channel4
+            .write_register(0xFF22, 0, self.frame_sequencer_step);
+          self
+            .channel4
+            .write_register(0xFF23, 0, self.frame_sequencer_step);
 
           // Clear global registers
           self.nr50 = 0;
