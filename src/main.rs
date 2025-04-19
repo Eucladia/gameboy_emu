@@ -27,6 +27,7 @@ use winit::{
 
 use std::{
   collections::VecDeque,
+  fmt::Write,
   fs,
   num::NonZeroU32,
   rc::Rc,
@@ -42,6 +43,10 @@ const GAMEBOY_HEIGHT: u32 = 144;
 
 const INITIAL_GAMEBOY_WIDTH: u32 = GAMEBOY_WIDTH * 6;
 const INITIAL_GAMEBOY_HEIGHT: u32 = GAMEBOY_HEIGHT * 6;
+
+/// The maximum length of the text buffer used to draw text.
+// 16 bytes is more than enough for both the FPS counter and volume.
+const TEXT_BUFFER_MAX_LENGTH: usize = 16;
 
 fn main() {
   let mut args = std::env::args();
@@ -91,6 +96,8 @@ fn main() {
   let mut last_fps_update = last_update;
 
   let mut window_frame = vec![0; (last_width * last_height) as usize];
+  // Pre-allocate and reuse this buffer to avoid a bunch of micro allocations.
+  let mut text_buffer = String::with_capacity(TEXT_BUFFER_MAX_LENGTH);
 
   event_loop
     .run(move |event, elwt| {
@@ -248,10 +255,12 @@ fn main() {
               const FPS_Y_POS: u32 = 2;
               const RED_COLOR: u32 = 0x00FF0000;
 
-              let fps_text = format!("FPS: {:.1}", fps);
+              text_buffer.clear();
+
+              write!(&mut text_buffer, "FPS: {:.1}", fps).unwrap();
 
               draw_text(
-                &fps_text,
+                &text_buffer,
                 &mut window_frame,
                 width,
                 FPS_X_POS,
@@ -262,13 +271,16 @@ fn main() {
 
               const VOLUME_TEXT_PADDING: u32 = 10;
 
-              let volume_text = format!("{} %", get_volume(&emulator.hardware.apu));
-              let volume_text_width = get_text_pixel_width(&volume_text, scale as u32);
+              text_buffer.clear();
+
+              write!(&mut text_buffer, "{} %", get_volume(&emulator.hardware.apu)).unwrap();
+
+              let volume_text_width = get_text_pixel_width(&text_buffer, scale as u32);
               let volume_x = width - volume_text_width - VOLUME_TEXT_PADDING;
               let volume_y = 2;
 
               draw_text(
-                &volume_text,
+                &text_buffer,
                 &mut window_frame,
                 width,
                 volume_x,
