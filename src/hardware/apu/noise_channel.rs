@@ -25,10 +25,10 @@ pub struct NoiseChannel {
 impl NoiseChannel {
   pub fn new() -> Self {
     Self {
-      nr41: 0xFF,
-      nr42: 0x00,
-      nr43: 0x00,
-      nr44: 0xBF,
+      nr41: 0,
+      nr42: 0,
+      nr43: 0,
+      nr44: 0,
 
       frequency_timer: 0,
       amplitude: 0,
@@ -128,7 +128,7 @@ impl NoiseChannel {
         // However, there are edge cases when this step is odd.
         let will_clock_length = frame_step & 1 == 0;
 
-        // There is an edge case when there was a falling edge for the length enable
+        // There is an edge case when there was a rising edge for the length enable
         // and the length counter isn't 0.
         //
         // When these conditions are met, the length gets clocked. If the clock caused
@@ -165,6 +165,21 @@ impl NoiseChannel {
 
       _ => unreachable!(),
     }
+  }
+
+  /// Clears all audio registers in this channel.
+  pub fn clear_registers(&mut self) {
+    self.nr41 = 0;
+    self.nr42 = 0;
+    self.nr43 = 0;
+    self.nr44 = 0;
+
+    self.enabled = false;
+    self.length_timer = 0;
+    self.frequency_timer = 0;
+    self.envelope_timer = 0;
+    self.amplitude = 0;
+    self.lsfr = 0x7FF;
   }
 
   /// Returns the current sample.

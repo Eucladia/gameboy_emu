@@ -26,18 +26,18 @@ pub struct WaveChannel {
 impl WaveChannel {
   pub fn new() -> Self {
     Self {
-      nr30: 0x7F,
-      nr31: 0xFF,
-      nr32: 0x9F,
-      nr33: 0xFF,
-      nr34: 0xBF,
+      nr30: 0,
+      nr31: 0,
+      nr32: 0,
+      nr33: 0,
+      nr34: 0,
 
       frequency_timer: 0,
       length_timer: 0,
-      wave_ram_index: 0,
       enabled: false,
 
       wave_ram: [0; 16],
+      wave_ram_index: 0,
     }
   }
 
@@ -104,7 +104,7 @@ impl WaveChannel {
         // However, there are edge cases when this step is odd.
         let will_clock_length = frame_step & 1 == 0;
 
-        // There is an edge case when there was a falling edge for the length enable
+        // There is an edge case when there was a rising edge for the length enable
         // and the length counter isn't 0.
         //
         // When these conditions are met, the length gets clocked. If the clock caused
@@ -141,6 +141,20 @@ impl WaveChannel {
 
       _ => unreachable!(),
     }
+  }
+
+  /// Clears all audio registers in this channel.
+  pub fn clear_registers(&mut self) {
+    self.nr30 = 0;
+    self.nr31 = 0;
+    self.nr32 = 0;
+    self.nr33 = 0;
+    self.nr34 = 0;
+
+    self.enabled = false;
+    self.frequency_timer = 0;
+    self.length_timer = 0;
+    self.wave_ram_index = 0;
   }
 
   /// Writes the value the channel's wave RAM at the provided address.

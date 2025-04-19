@@ -31,11 +31,11 @@ pub struct PulseSweepChannel {
 impl PulseSweepChannel {
   pub fn new() -> Self {
     Self {
-      nr10: 0x80,
-      nr11: 0xBF,
-      nr12: 0xF3,
-      nr13: 0xFF,
-      nr14: 0xBF,
+      nr10: 0,
+      nr11: 0,
+      nr12: 0,
+      nr13: 0,
+      nr14: 0,
 
       frequency_timer: 0,
       duty_step: 0,
@@ -164,7 +164,7 @@ impl PulseSweepChannel {
         // However, there are edge cases when this step is odd.
         let will_clock_length = frame_step & 1 == 0;
 
-        // There is an edge case when there was a falling edge for the length enable
+        // There is an edge case when there was a rising edge for the length enable
         // and the length counter isn't 0.
         //
         // When these conditions are met, the length gets clocked. If the clock caused
@@ -200,6 +200,26 @@ impl PulseSweepChannel {
       }
       _ => unreachable!(),
     }
+  }
+
+  /// Clears all audio registers in this channel.
+  pub fn clear_registers(&mut self) {
+    self.nr10 = 0;
+    self.nr11 = 0;
+    self.nr12 = 0;
+    self.nr13 = 0;
+    self.nr14 = 0;
+
+    self.enabled = false;
+    self.frequency_timer = 0;
+    self.envelope_timer = 0;
+    self.length_timer = 0;
+    self.amplitude = 0;
+    self.duty_step = 0;
+
+    self.shadow_frequency = 0;
+    self.sweep_timer = 0;
+    self.sweep_enabled = false;
   }
 
   /// Returns whether this sound channel is enabled.

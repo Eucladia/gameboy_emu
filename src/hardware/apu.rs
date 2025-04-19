@@ -43,9 +43,9 @@ impl Apu {
       channel3: WaveChannel::new(),
       channel4: NoiseChannel::new(),
 
-      nr50: 0x77,
-      nr51: 0xF3,
-      nr52: 0x8F,
+      nr50: 0,
+      nr51: 0,
+      nr52: 0,
 
       frame_sequencer_cycles: 0,
       frame_sequencer_step: 0,
@@ -100,7 +100,7 @@ impl Apu {
       // Wave RAM
       0xFF30..0xFF40 => self.channel3.read_wave_ram(address),
 
-      x => unreachable!("tried to read {:02X}", x),
+      x => unreachable!("apu: tried to read {:02X}", x),
     }
   }
 
@@ -161,78 +161,25 @@ impl Apu {
 
         // The APU is being turned off, so we need to reset the registers
         if self.is_enabled() && !is_flag_set!(value, APU_ENABLE_MASK) {
-          // Clear channel 1's registers
-          self
-            .channel1
-            .write_register(0xFF10, 0, self.frame_sequencer_step);
-          self
-            .channel1
-            .write_register(0xFF11, 0, self.frame_sequencer_step);
-          self
-            .channel1
-            .write_register(0xFF12, 0, self.frame_sequencer_step);
-          self
-            .channel1
-            .write_register(0xFF13, 0, self.frame_sequencer_step);
-          self
-            .channel1
-            .write_register(0xFF14, 0, self.frame_sequencer_step);
-
-          // Clear channel 2's registers
-          self
-            .channel2
-            .write_register(0xFF16, 0, self.frame_sequencer_step);
-          self
-            .channel2
-            .write_register(0xFF17, 0, self.frame_sequencer_step);
-          self
-            .channel2
-            .write_register(0xFF18, 0, self.frame_sequencer_step);
-          self
-            .channel2
-            .write_register(0xFF19, 0, self.frame_sequencer_step);
-
-          // Clear channel 3's registers
-          self
-            .channel3
-            .write_register(0xFF1A, 0, self.frame_sequencer_step);
-          self
-            .channel3
-            .write_register(0xFF1B, 0, self.frame_sequencer_step);
-          self
-            .channel3
-            .write_register(0xFF1C, 0, self.frame_sequencer_step);
-          self
-            .channel3
-            .write_register(0xFF1D, 0, self.frame_sequencer_step);
-          self
-            .channel3
-            .write_register(0xFF1E, 0, self.frame_sequencer_step);
-
-          // Clear channel 4's registers
-          self
-            .channel4
-            .write_register(0xFF21, 0, self.frame_sequencer_step);
-          self
-            .channel4
-            .write_register(0xFF22, 0, self.frame_sequencer_step);
-          self
-            .channel4
-            .write_register(0xFF23, 0, self.frame_sequencer_step);
+          // Clear sound channels
+          self.channel1.clear_registers();
+          self.channel2.clear_registers();
+          self.channel3.clear_registers();
+          self.channel4.clear_registers();
 
           // Clear global registers
           self.nr50 = 0;
           self.nr51 = 0;
         }
 
-        // Only keep the MSB since the lower nibble is read-only
+        // Only the MSB is writeable
         self.nr52 = value & 0x80;
       }
 
       // Wave RAM
       0xFF30..0xFF40 => self.channel3.write_wave_ram(address, value),
 
-      x => unreachable!("tried to write {:02X}", x),
+      x => unreachable!("apu: tried to write {:02X}", x),
     }
   }
 

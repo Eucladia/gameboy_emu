@@ -24,10 +24,10 @@ pub struct PulseChannel {
 impl PulseChannel {
   pub fn new() -> Self {
     Self {
-      nr21: 0x3F,
-      nr22: 0x00,
-      nr23: 0xFF,
-      nr24: 0xBF,
+      nr21: 0,
+      nr22: 0,
+      nr23: 0,
+      nr24: 0,
 
       frequency_timer: 0,
       duty_step: 0,
@@ -136,7 +136,7 @@ impl PulseChannel {
         // However, there are edge cases when this step is odd.
         let will_clock_length = frame_step & 1 == 0;
 
-        // There is an edge case when there was a falling edge for the length enable
+        // There is an edge case when there was a rising edge for the length enable
         // and the length counter isn't 0.
         //
         // When these conditions are met, the length gets clocked. If the clock caused
@@ -173,6 +173,21 @@ impl PulseChannel {
 
       _ => unreachable!(),
     }
+  }
+
+  /// Clears all audio registers in this channel.
+  pub fn clear_registers(&mut self) {
+    self.nr21 = 0;
+    self.nr22 = 0;
+    self.nr23 = 0;
+    self.nr24 = 0;
+
+    self.enabled = false;
+    self.frequency_timer = 0;
+    self.length_timer = 0;
+    self.envelope_timer = 0;
+    self.amplitude = 0;
+    self.duty_step = 0
   }
 
   /// Returns whether this sound channel is enabled.
