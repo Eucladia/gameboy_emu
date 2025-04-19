@@ -17,7 +17,7 @@ pub struct PulseSweepChannel {
   frequency_timer: u16,
 
   duty_step: u8,
-  amplitude: u8,
+  volume: u8,
   length_timer: u8,
   envelope_timer: u8,
 
@@ -39,7 +39,7 @@ impl PulseSweepChannel {
 
       frequency_timer: 0,
       duty_step: 0,
-      amplitude: 0,
+      volume: 0,
       length_timer: 0,
       envelope_timer: 0,
 
@@ -121,7 +121,7 @@ impl PulseSweepChannel {
 
     let wave_duty = self.nr11 >> 6;
 
-    DUTY_TABLE[wave_duty as usize][self.duty_step as usize] * self.amplitude
+    DUTY_TABLE[wave_duty as usize][self.duty_step as usize] * self.volume
   }
 
   /// Reads the channel's registers.
@@ -214,7 +214,7 @@ impl PulseSweepChannel {
     self.frequency_timer = 0;
     self.envelope_timer = 0;
     self.length_timer = 0;
-    self.amplitude = 0;
+    self.volume = 0;
     self.duty_step = 0;
 
     self.shadow_frequency = 0;
@@ -237,7 +237,7 @@ impl PulseSweepChannel {
 
     self.frequency_timer = self.frequency_timer_reload() * DOTS_MULTIPLIER;
     self.envelope_timer = self.nr12 & 0x07;
-    self.amplitude = self.nr12 >> 4;
+    self.volume = self.nr12 >> 4;
     self.duty_step = 0;
 
     // Update the sweep registers
@@ -267,13 +267,13 @@ impl PulseSweepChannel {
 
     self.envelope_timer = self.nr12 & 0x07;
 
-    // Update the amplitude, bounding it to [0, 15]
+    // Update the volume, bounding it to [0, 15]
     if is_flag_set!(self.nr12, ENVELOPE_DIRECTION_MASK) {
-      if self.amplitude < 0x0F {
-        self.amplitude += 1;
+      if self.volume < 0x0F {
+        self.volume += 1;
       }
     } else {
-      self.amplitude = self.amplitude.saturating_sub(1);
+      self.volume = self.volume.saturating_sub(1);
     }
   }
 

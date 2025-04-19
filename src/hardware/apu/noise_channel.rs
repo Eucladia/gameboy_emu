@@ -13,7 +13,7 @@ pub struct NoiseChannel {
   nr44: u8,
 
   frequency_timer: u16,
-  amplitude: u8,
+  volume: u8,
   envelope_timer: u8,
   length_timer: u8,
 
@@ -31,7 +31,7 @@ impl NoiseChannel {
       nr44: 0,
 
       frequency_timer: 0,
-      amplitude: 0,
+      volume: 0,
       envelope_timer: 0,
       length_timer: 0,
 
@@ -178,7 +178,7 @@ impl NoiseChannel {
     self.length_timer = 0;
     self.frequency_timer = 0;
     self.envelope_timer = 0;
-    self.amplitude = 0;
+    self.volume = 0;
     self.lsfr = 0x7FF;
   }
 
@@ -189,7 +189,7 @@ impl NoiseChannel {
     }
 
     if (self.lsfr & 0x01) == 0 {
-      self.amplitude
+      self.volume
     } else {
       0
     }
@@ -209,7 +209,7 @@ impl NoiseChannel {
     }
 
     self.envelope_timer = self.nr42 & 0x07;
-    self.amplitude = (self.nr42 >> 4) & 0x0F;
+    self.volume = (self.nr42 >> 4) & 0x0F;
     self.lsfr = 0x7FFF;
   }
 
@@ -221,11 +221,11 @@ impl NoiseChannel {
 
     // Update the volume
     if is_flag_set!(self.nr42, ENVELOPE_DIRECTION_MASK) {
-      if self.amplitude < 0x0F {
-        self.amplitude += 1;
+      if self.volume < 0x0F {
+        self.volume += 1;
       }
     } else {
-      self.amplitude = self.amplitude.saturating_sub(1);
+      self.volume = self.volume.saturating_sub(1);
     }
   }
 
