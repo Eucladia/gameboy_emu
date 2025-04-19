@@ -32,6 +32,8 @@ pub struct Apu {
 
   dots: u16,
 
+  volume: f32,
+
   audio_buffer: Arc<Mutex<VecDeque<AudioSample>>>,
 }
 
@@ -51,6 +53,8 @@ impl Apu {
       frame_sequencer_step: 0,
 
       dots: 0,
+
+      volume: 0.5,
 
       audio_buffer: Arc::new(Mutex::new(VecDeque::new())),
     }
@@ -183,6 +187,26 @@ impl Apu {
     }
   }
 
+  /// Increments the master volume by 10%.
+  pub fn increment_volume(&mut self) {
+    self.set_volume(self.volume() + VOLUME_INCREMENT);
+  }
+
+  /// Decrements the master volume by 10%.
+  pub fn decrement_volume(&mut self) {
+    self.set_volume(self.volume() - VOLUME_INCREMENT)
+  }
+
+  /// Sets the master volume.
+  pub fn set_volume(&mut self, volume: f32) {
+    self.volume = volume.clamp(0.0, 1.0);
+  }
+
+  /// Returns the current master volume.
+  pub fn volume(&self) -> f32 {
+    self.volume
+  }
+
   /// Returns the audio buffer.
   pub fn audio_buffer(&self) -> Arc<Mutex<VecDeque<AudioSample>>> {
     Arc::clone(&self.audio_buffer)
@@ -190,8 +214,6 @@ impl Apu {
 
   /// Pushes a new audio channel into the audio buffer.
   fn push_audio_sample(&self) {
-    const MASTER_VOLUME: f32 = 0.5;
-
     let ch1 = self.channel1.get_sample();
     let ch2 = self.channel2.get_sample();
     let ch3 = self.channel3.get_sample();
@@ -236,7 +258,7 @@ impl Apu {
     right *= (right_volume + 1) as f32 / 8.0;
 
     // Scale by the master volume and normalize the outputs
-    let volume_scale = MASTER_VOLUME / 4.0;
+    let volume_scale = self.volume / 4.0;
 
     left *= volume_scale;
     right *= volume_scale;
@@ -360,3 +382,5 @@ const FRAME_SEQEUNCER_CYCLES: u16 = 8192;
 const FRAME_SEQUENCER_STEP_COUNT: u8 = 8;
 /// The bitmask for checking whether the APU is enabled.
 const APU_ENABLE_MASK: u8 = 0b1000_0000;
+/// The increment for adjusting the volume.
+const VOLUME_INCREMENT: f32 = 0.10;

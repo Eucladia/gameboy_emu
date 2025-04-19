@@ -6,7 +6,11 @@ mod interrupts;
 
 use emulator::Emulator;
 use flags::is_flag_set;
-use hardware::{Cpu, Hardware, apu::AudioSample, joypad::Button};
+use hardware::{
+  Cpu, Hardware,
+  apu::{Apu, AudioSample},
+  joypad::Button,
+};
 
 use cpal::{
   BufferSize, SampleRate, StreamConfig,
@@ -76,16 +80,15 @@ fn main() {
   let mut last_update = Instant::now();
   let mut first_update = true;
   let mut limit_frames = true;
+  let mut show_debug_info = false;
+  let mut is_shift_held = false;
 
   let mut last_width = INITIAL_GAMEBOY_WIDTH;
   let mut last_height = INITIAL_GAMEBOY_HEIGHT;
 
-  let mut show_fps = false;
   let mut fps = 0.0;
   let mut num_frames = 0;
   let mut last_fps_update = last_update;
-
-  let mut is_shift_held = false;
 
   let mut window_frame = vec![0; (last_width * last_height) as usize];
 
@@ -129,7 +132,19 @@ fn main() {
           PhysicalKey::Code(KeyCode::Digit1)
             if is_shift_held && matches!(state, ElementState::Pressed) =>
           {
-            show_fps = !show_fps;
+            show_debug_info = !show_debug_info;
+          }
+          // `Shift` and `-` decreases the master volume
+          PhysicalKey::Code(KeyCode::Minus)
+            if is_shift_held && matches!(state, ElementState::Pressed) =>
+          {
+            emulator.hardware.apu.decrement_volume();
+          }
+          // `Shift` and `=` increases the master volume
+          PhysicalKey::Code(KeyCode::Equal)
+            if is_shift_held && matches!(state, ElementState::Pressed) =>
+          {
+            emulator.hardware.apu.increment_volume();
           }
           PhysicalKey::Code(KeyCode::Space) if matches!(state, ElementState::Released) => {
             limit_frames = !limit_frames;
@@ -225,10 +240,10 @@ fn main() {
               num_frames = 0;
             }
 
-            if show_fps {
+            if show_debug_info {
               const FPS_X_POS: u32 = 2;
               const FPS_Y_POS: u32 = 2;
-              const FPS_TEXT_COLOR: u32 = 0x00FF0000;
+              const RED_COLOR: u32 = 0x00FF0000;
 
               let fps_text = format!("FPS: {:.1}", fps);
 
@@ -238,7 +253,24 @@ fn main() {
                 width,
                 FPS_X_POS,
                 FPS_Y_POS,
-                FPS_TEXT_COLOR,
+                RED_COLOR,
+                scale as u32,
+              );
+
+              const VOLUME_TEXT_PADDING: u32 = 10;
+
+              let volume_text = format!("{} %", get_volume(&emulator.hardware.apu));
+              let volume_text_width = get_text_pixel_width(&volume_text, scale as u32);
+              let volume_x = width - volume_text_width - VOLUME_TEXT_PADDING;
+              let volume_y = 2;
+
+              draw_text(
+                &volume_text,
+                &mut window_frame,
+                width,
+                volume_x,
+                volume_y,
+                RED_COLOR,
                 scale as u32,
               );
             }
@@ -500,6 +532,16 @@ const fn get_character_bitmap(byte: u8) -> Option<[u8; DEFAULT_CHARACTER_HEIGHT 
       0b00000000,
       0b00000000,
     ]),
+    b'%' => Some([
+      0b1100001,
+      0b1100010,
+      0b0000100,
+      0b0001000,
+      0b0010000,
+      0b0100000,
+      0b1000011,
+      0b0000011,
+    ]),
     _ => None,
   }
 }
@@ -528,4 +570,14 @@ fn compute_scale_factor(window_width: u32, window_height: u32) -> f64 {
   let scale_y = window_height as f64 / GAMEBOY_HEIGHT as f64;
 
   scale_x.min(scale_y).max(1.0)
+}
+
+/// Returns the pixel width of the scaled text.
+fn get_text_pixel_width(text: &str, scale: u32) -> u32 {
+  (DEFAULT_CHARACTER_WIDTH * scale) * text.len() as u32
+}
+
+/// Returns the current volume of the APU as an integer.
+fn get_volume(apu: &Apu) -> u8 {
+  (apu.volume() * 100.0).round() as u8
 }
