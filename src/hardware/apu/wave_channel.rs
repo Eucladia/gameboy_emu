@@ -72,13 +72,6 @@ impl WaveChannel {
       0x1C => self.nr32 | 0x9F,
       0x1D => 0xFF,
       0x1E => self.nr34 | 0xBF,
-      0x30..0x40 => {
-        if self.enabled {
-          0xFF
-        } else {
-          self.wave_ram[address as usize - 0xFF30]
-        }
-      }
 
       _ => unreachable!(),
     }
@@ -145,9 +138,23 @@ impl WaveChannel {
           self.length_timer -= 1;
         }
       }
-      0x30..0x40 => self.wave_ram[address as usize - 0xFF30] = value,
 
       _ => unreachable!(),
+    }
+  }
+
+  /// Writes the value the channel's wave RAM at the provided address.
+  pub fn write_wave_ram(&mut self, address: u16, value: u8) {
+    self.wave_ram[address as usize - 0xFF30] = value;
+  }
+
+  /// Reads the channel's wave RAM from the provided address.
+  pub fn read_wave_ram(&self, address: u16) -> u8 {
+    // If the channel is enabled, then the memory bus is already occupied
+    if self.enabled {
+      0xFF
+    } else {
+      self.wave_ram[address as usize - 0xFF30]
     }
   }
 

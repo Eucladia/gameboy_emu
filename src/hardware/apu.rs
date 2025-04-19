@@ -86,7 +86,7 @@ impl Apu {
       // Sound channel 2
       0xFF16..0xFF1A => self.channel2.read_register(address),
       // Sound channel 3
-      0xFF1A..0xFF1F | 0xFF30..0xFF40 => self.channel3.read_register(address),
+      0xFF1A..0xFF1F => self.channel3.read_register(address),
       // Undocumented
       0xFF1F => 0xFF,
       // Sound channel 4
@@ -96,6 +96,9 @@ impl Apu {
       0xFF24 => self.nr50,
       0xFF25 => self.nr51,
       0xFF26 => self.nr52 | self.enabled_channels() | 0b0111_0000,
+
+      // Wave RAM
+      0xFF30..0xFF40 => self.channel3.read_wave_ram(address),
 
       x => unreachable!("tried to read {:02X}", x),
     }
@@ -131,9 +134,6 @@ impl Apu {
             .write_register(address, value, self.frame_sequencer_step)
         }
       }
-      0xFF30..0xFF40 => self
-        .channel3
-        .write_register(address, value, self.frame_sequencer_step),
       // Undocumented
       0xFF1F => {}
       // Sound channel 4
@@ -228,6 +228,9 @@ impl Apu {
         // Only keep the MSB since the lower nibble is read-only
         self.nr52 = value & 0x80;
       }
+
+      // Wave RAM
+      0xFF30..0xFF40 => self.channel3.write_wave_ram(address, value),
 
       x => unreachable!("tried to write {:02X}", x),
     }
