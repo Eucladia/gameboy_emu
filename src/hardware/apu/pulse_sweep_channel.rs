@@ -27,8 +27,8 @@ pub struct PulseSweepChannel {
   sweep_timer: u8,
   sweep_enabled: bool,
 
-  /// Whether the last sweep calculation was negative.
-  last_sweep_calc_negative: bool,
+  /// Whether there was a negative sweep calculation since the last trigger.
+  had_negative_sweep_calc: bool,
 }
 
 impl PulseSweepChannel {
@@ -52,7 +52,7 @@ impl PulseSweepChannel {
       sweep_timer: 0,
       sweep_enabled: false,
 
-      last_sweep_calc_negative: false,
+      had_negative_sweep_calc: false,
     }
   }
 
@@ -148,7 +148,7 @@ impl PulseSweepChannel {
       0x10 => {
         // We went from negative to positive after a negative sweep calculation
         // was done, so disable the channel.
-        if self.last_sweep_calc_negative
+        if self.had_negative_sweep_calc
           && is_flag_set!(self.nr10, SWEEP_DIRECTION_MASK)
           && !is_flag_set!(value, SWEEP_DIRECTION_MASK)
         {
@@ -236,7 +236,7 @@ impl PulseSweepChannel {
     self.shadow_frequency = 0;
     self.sweep_timer = 0;
     self.sweep_enabled = false;
-    self.last_sweep_calc_negative = false;
+    self.had_negative_sweep_calc = false;
   }
 
   /// Returns whether this sound channel is enabled.
@@ -272,7 +272,7 @@ impl PulseSweepChannel {
     self.sweep_enabled = sweep_pace != 0 || sweep_step != 0;
     // It's important to reset the flag here because the next call to
     // `calculate_next_sweep_frequency` can be a negative sweep calculation.
-    self.last_sweep_calc_negative = false;
+    self.had_negative_sweep_calc = false;
 
     if sweep_step != 0 {
       let new_freq = self.calculate_next_sweep_frequency();
@@ -317,10 +317,12 @@ impl PulseSweepChannel {
   fn calculate_next_sweep_frequency(&mut self) -> u16 {
     let sweep_shift = self.nr10 & 0x07;
 
-    // Update the last sweep negative flag
-    self.last_sweep_calc_negative = is_flag_set!(self.nr10, SWEEP_DIRECTION_MASK);
-
     if is_flag_set!(self.nr10, SWEEP_DIRECTION_MASK) {
+      // NOTE: Place this inside because the GBDev Wiki says that there needs to be have
+      // been *at least* one negative sweep calculation done for the channel to be
+      // considered for disabling when writing to NR10.
+      self.had_negative_sweep_calc = true;
+
       self.shadow_frequency - (self.shadow_frequency >> sweep_shift)
     } else {
       self.shadow_frequency + (self.shadow_frequency >> sweep_shift)
