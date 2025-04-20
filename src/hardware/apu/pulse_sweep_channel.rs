@@ -26,6 +26,9 @@ pub struct PulseSweepChannel {
   shadow_frequency: u16,
   sweep_timer: u8,
   sweep_enabled: bool,
+
+  /// Whether the last sweep calculation was negative.
+  last_sweep_calc_negative: bool,
 }
 
 impl PulseSweepChannel {
@@ -48,6 +51,8 @@ impl PulseSweepChannel {
       shadow_frequency: 0,
       sweep_timer: 0,
       sweep_enabled: false,
+
+      last_sweep_calc_negative: false,
     }
   }
 
@@ -140,7 +145,18 @@ impl PulseSweepChannel {
   /// Writes to the channel's registers.
   pub fn write_register(&mut self, address: u16, value: u8, frame_step: u8) {
     match address & 0xFF {
-      0x10 => self.nr10 = value,
+      0x10 => {
+        // We went from negative to positive after a negative sweep calculation
+        // was done, so disable the channel.
+        if self.last_sweep_calc_negative
+          && is_flag_set!(self.nr10, SWEEP_DIRECTION_MASK)
+          && !is_flag_set!(value, SWEEP_DIRECTION_MASK)
+        {
+          self.enabled = false;
+        }
+
+        self.nr10 = value;
+      }
       0x11 => {
         self.nr11 = value;
         self.reload_length_timer();
@@ -220,6 +236,7 @@ impl PulseSweepChannel {
     self.shadow_frequency = 0;
     self.sweep_timer = 0;
     self.sweep_enabled = false;
+    self.last_sweep_calc_negative = false;
   }
 
   /// Returns whether this sound channel is enabled.
@@ -253,9 +270,12 @@ impl PulseSweepChannel {
     let sweep_step = self.nr10 & 0x07;
 
     self.sweep_enabled = sweep_pace != 0 || sweep_step != 0;
+    // It's important to reset the flag here because the next call to
+    // `calculate_next_sweep_frequency` can be a negative sweep calculation.
+    self.last_sweep_calc_negative = false;
 
     if sweep_step != 0 {
-      let new_freq = self.get_next_sweep_frequency();
+      let new_freq = self.calculate_next_sweep_frequency();
 
       if new_freq > 0x07FF {
         self.enabled = false;
@@ -265,8 +285,6 @@ impl PulseSweepChannel {
 
   /// Updates the envelope timer.
   fn update_envelope_timer(&mut self) {
-    const ENVELOPE_DIRECTION_MASK: u8 = 0b0000_1000;
-
     self.envelope_timer = self.nr12 & 0x07;
 
     // Update the volume, bounding it to [0, 15]
@@ -295,11 +313,12 @@ impl PulseSweepChannel {
     }
   }
 
-  /// Gets the next frequency value.
-  fn get_next_sweep_frequency(&self) -> u16 {
-    const SWEEP_DIRECTION_MASK: u8 = 0b0000_1000;
-
+  /// Calculates the next frequency value.
+  fn calculate_next_sweep_frequency(&mut self) -> u16 {
     let sweep_shift = self.nr10 & 0x07;
+
+    // Update the last sweep negative flag
+    self.last_sweep_calc_negative = is_flag_set!(self.nr10, SWEEP_DIRECTION_MASK);
 
     if is_flag_set!(self.nr10, SWEEP_DIRECTION_MASK) {
       self.shadow_frequency - (self.shadow_frequency >> sweep_shift)
@@ -310,7 +329,7 @@ impl PulseSweepChannel {
 
   /// Updates the sweep frequency.
   fn update_sweep_frequency(&mut self) {
-    let new_freq = self.get_next_sweep_frequency();
+    let new_freq = self.calculate_next_sweep_frequency();
     let sweep_shift = self.nr10 & 0x07;
 
     // Turn off the channel if the new frequency would overflow
@@ -326,7 +345,7 @@ impl PulseSweepChannel {
       self.nr13 = (new_freq & 0xFF) as u8;
       self.nr14 = (self.nr14 & 0b1111_1000) | (new_freq >> 8) as u8 & 0x07;
 
-      let new_freq = self.get_next_sweep_frequency();
+      let new_freq = self.calculate_next_sweep_frequency();
 
       if new_freq > 0x7FF {
         self.enabled = false;
@@ -375,3 +394,7 @@ const CHANNEL_TRIGGER_MASK: u8 = 0b1000_0000;
 const WAVEFORM_SAMPLE_COUNT: u8 = 8;
 /// The bitmask for enabling the length timer.
 const TIMER_LENGTH_ENABLE_MASK: u8 = 0b0100_0000;
+/// The bitmask for the direction bit for the envelope.
+const ENVELOPE_DIRECTION_MASK: u8 = 0b0000_1000;
+/// The bitmask for the direction bit for the sweep.
+const SWEEP_DIRECTION_MASK: u8 = 0b0000_1000;
