@@ -8,12 +8,14 @@ and this project does not adhere to [Semantic Versioning](https://semver.org/spe
 ## [Unreleased]
 
 ### Added
-- Support for configuring the master volume via `Shift` + `-` / `+`.
+- Support for incrementing and decrementing the master volume via `Shift` + `+` / `-`.
 - Toggleable volume overlay when pressing `Shift` + `1`.
 
 ### Fixed
-- Implement edge case bugs in sound channels' `trigger` fn, allowing  us to pass 
-  the `03-trigger` test in Blargg's test ROMs.
+- Implement edge case bugs when triggering sound channels', allowing us to pass 
+  Blargg's `03-trigger` test.
+- Properly set the internal sweep enabled register on trigger, allowing us to pass
+  Blargg's `04-sweep` test.
 - Properly clear all APU registers when disabling the APU.
 
 ### Changed
@@ -26,7 +28,7 @@ and this project does not adhere to [Semantic Versioning](https://semver.org/spe
 
 Initial release.
 
-- Capable of running basic games like Tetris and Dr. Mario.
+- Capable of running basic games like **Tetris** and **Dr. Mario**.
 - Supports games up to MBC 1.
-- Passes Blargg's instr_timing and cpu_instrs tests.
+- Passes Blargg's `instr_timing` and `cpu_instrs` tests.
 - Audio is functional but not fully accurate due to many edge cases on the Gameboy.
