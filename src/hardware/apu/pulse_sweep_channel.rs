@@ -241,16 +241,18 @@ impl PulseSweepChannel {
     self.duty_step = 0;
 
     // Update the sweep registers
+    let sweep_pace = (self.nr10 >> 4) & 0x07;
+
     self.shadow_frequency = self.get_period();
-    self.sweep_timer = (self.nr10 >> 4) & 0x07;
+    self.sweep_timer = sweep_pace;
 
     if self.sweep_timer == 0 {
       self.sweep_timer = 8;
     }
 
-    self.sweep_enabled = (self.nr10 & 0b0111_1111) != 0;
-
     let sweep_step = self.nr10 & 0x07;
+
+    self.sweep_enabled = sweep_pace != 0 || sweep_step != 0;
 
     if sweep_step != 0 {
       let new_freq = self.get_next_sweep_frequency();
