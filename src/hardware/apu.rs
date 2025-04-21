@@ -62,6 +62,10 @@ impl Apu {
 
   /// Steps the APU.
   pub fn step(&mut self, cycles: usize) {
+    if !self.is_enabled() {
+      return;
+    }
+
     for _ in 0..cycles {
       self.channel1.step();
       self.channel2.step();
@@ -110,61 +114,55 @@ impl Apu {
 
   /// Writes to the APU's registers.
   pub fn write_register(&mut self, address: u16, value: u8) {
-    // Only wave RAM and the master control are writable when the APU is disabled.
+    // Only NR52, wave RAM, and the length counters are writable when the APU is disabled.
+    let apu_enabled = self.is_enabled();
+
     match address {
       // Sound channel 1
       0xFF10..0xFF15 => {
-        if self.is_enabled() {
-          self
-            .channel1
-            .write_register(address, value, self.frame_sequencer_step)
-        }
+        self
+          .channel1
+          .write_register(apu_enabled, address, value, self.frame_sequencer_step)
       }
       // Undocumented
       0xFF15 => {}
       // Sound channel 2
       0xFF16..0xFF1A => {
-        if self.is_enabled() {
-          self
-            .channel2
-            .write_register(address, value, self.frame_sequencer_step)
-        }
+        self
+          .channel2
+          .write_register(apu_enabled, address, value, self.frame_sequencer_step)
       }
       // Sound channel 3
       0xFF1A..0xFF1F => {
-        if self.is_enabled() {
-          self
-            .channel3
-            .write_register(address, value, self.frame_sequencer_step)
-        }
+        self
+          .channel3
+          .write_register(apu_enabled, address, value, self.frame_sequencer_step)
       }
       // Undocumented
       0xFF1F => {}
       // Sound channel 4
       0xFF20..0xFF24 => {
-        if self.is_enabled() {
-          self
-            .channel4
-            .write_register(address, value, self.frame_sequencer_step)
-        }
+        self
+          .channel4
+          .write_register(apu_enabled, address, value, self.frame_sequencer_step)
       }
 
       // Global registers
       0xFF24 => {
-        if self.is_enabled() {
+        if apu_enabled {
           self.nr50 = value
         }
       }
       0xFF25 => {
-        if self.is_enabled() {
+        if apu_enabled {
           self.nr51 = value
         }
       }
       0xFF26 => {
         const APU_ENABLE_MASK: u8 = 0b1000_0000;
 
-        let turning_off = self.is_enabled() && !is_flag_set!(value, APU_ENABLE_MASK);
-        let turning_on = !self.is_enabled() && is_flag_set!(value, APU_ENABLE_MASK);
+        let turning_off = apu_enabled && !is_flag_set!(value, APU_ENABLE_MASK);
+        let turning_on = !apu_enabled && is_flag_set!(value, APU_ENABLE_MASK);
 
         // If the APU is being turned off, we need to clear its registers.
         if turning_off {

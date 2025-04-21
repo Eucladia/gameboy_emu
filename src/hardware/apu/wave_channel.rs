@@ -78,8 +78,16 @@ impl WaveChannel {
   }
 
   /// Writes to the channel's registers.
-  pub fn write_register(&mut self, address: u16, value: u8, frame_step: u8) {
-    match address & 0xFF {
+  pub fn write_register(&mut self, apu_enabled: bool, address: u16, value: u8, frame_step: u8) {
+    let lower_byte = address & 0xFF;
+
+    // Writes aren't allowed when the APU is turned off, unless we're writing to the
+    // length counter.
+    if !apu_enabled && lower_byte != 0x1B {
+      return;
+    }
+
+    match lower_byte {
       0x1A => {
         self.nr30 = value;
 
@@ -143,7 +151,7 @@ impl WaveChannel {
     }
   }
 
-  /// Clears all audio registers in this channel.
+  /// Clears the audio registers in this channel.
   pub fn clear_registers(&mut self) {
     self.nr30 = 0;
     self.nr31 = 0;
@@ -152,9 +160,6 @@ impl WaveChannel {
     self.nr34 = 0;
 
     self.enabled = false;
-    self.frequency_timer = 0;
-    self.length_timer = 0;
-    self.wave_ram_index = 0;
   }
 
   /// Writes the value the channel's wave RAM at the provided address.

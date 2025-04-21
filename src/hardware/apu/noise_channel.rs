@@ -103,8 +103,16 @@ impl NoiseChannel {
   }
 
   /// Writes to this channel's registers.
-  pub fn write_register(&mut self, address: u16, value: u8, frame_step: u8) {
-    match address & 0xFF {
+  pub fn write_register(&mut self, apu_enabled: bool, address: u16, value: u8, frame_step: u8) {
+    let lower_byte = address & 0xFF;
+
+    // Writes aren't allowed when the APU is turned off, unless we're writing to the
+    // length counter.
+    if !apu_enabled && lower_byte != 0x20 {
+      return;
+    }
+
+    match lower_byte {
       0x20 => {
         self.nr41 = value;
         self.reload_length_timer();
@@ -167,7 +175,7 @@ impl NoiseChannel {
     }
   }
 
-  /// Clears all audio registers in this channel.
+  /// Clears the audio registers in this channel.
   pub fn clear_registers(&mut self) {
     self.nr41 = 0;
     self.nr42 = 0;
@@ -175,11 +183,6 @@ impl NoiseChannel {
     self.nr44 = 0;
 
     self.enabled = false;
-    self.length_timer = 0;
-    self.frequency_timer = 0;
-    self.envelope_timer = 0;
-    self.volume = 0;
-    self.lsfr = 0x7FF;
   }
 
   /// Returns the current sample.

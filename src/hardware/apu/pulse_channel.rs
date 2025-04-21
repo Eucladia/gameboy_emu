@@ -111,10 +111,19 @@ impl PulseChannel {
   }
 
   /// Writes to the channel's registers.
-  pub fn write_register(&mut self, address: u16, value: u8, frame_step: u8) {
-    match address & 0xFF {
+  pub fn write_register(&mut self, apu_enabled: bool, address: u16, value: u8, frame_step: u8) {
+    let lower_byte = address & 0xFF;
+
+    // Writes aren't allowed when the APU is turned off, unless we're writing to the
+    // length counter.
+    if !apu_enabled && lower_byte != 0x16 {
+      return;
+    }
+
+    match lower_byte {
       0x16 => {
-        self.nr21 = value;
+        // If the APU is disabled, then ONLY read the length bits
+        self.nr21 = if apu_enabled { value } else { value & 0x3F };
         self.reload_length_timer();
       }
       0x17 => {
@@ -175,7 +184,7 @@ impl PulseChannel {
     }
   }
 
-  /// Clears all audio registers in this channel.
+  /// Clears the audio registers in this channel.
   pub fn clear_registers(&mut self) {
     self.nr21 = 0;
     self.nr22 = 0;
@@ -183,11 +192,6 @@ impl PulseChannel {
     self.nr24 = 0;
 
     self.enabled = false;
-    self.frequency_timer = 0;
-    self.length_timer = 0;
-    self.envelope_timer = 0;
-    self.volume = 0;
-    self.duty_step = 0
   }
 
   /// Returns whether this sound channel is enabled.

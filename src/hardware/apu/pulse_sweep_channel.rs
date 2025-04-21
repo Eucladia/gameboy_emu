@@ -143,8 +143,16 @@ impl PulseSweepChannel {
   }
 
   /// Writes to the channel's registers.
-  pub fn write_register(&mut self, address: u16, value: u8, frame_step: u8) {
-    match address & 0xFF {
+  pub fn write_register(&mut self, apu_enabled: bool, address: u16, value: u8, frame_step: u8) {
+    let lower_byte = address & 0xFF;
+
+    // Writes aren't allowed when the APU is turned off, unless we're writing to the
+    // length counter.
+    if !apu_enabled && lower_byte != 0x11 {
+      return;
+    }
+
+    match lower_byte {
       0x10 => {
         // We went from negative to positive after a negative sweep calculation
         // was done, so disable the channel.
@@ -158,7 +166,8 @@ impl PulseSweepChannel {
         self.nr10 = value;
       }
       0x11 => {
-        self.nr11 = value;
+        // If the APU is disabled, then ONLY read the length bits
+        self.nr11 = if apu_enabled { value } else { value & 0x3F };
         self.reload_length_timer();
       }
       0x12 => {
@@ -218,7 +227,7 @@ impl PulseSweepChannel {
     }
   }
 
-  /// Clears all audio registers in this channel.
+  /// Clears the audio registers in this channel.
   pub fn clear_registers(&mut self) {
     self.nr10 = 0;
     self.nr11 = 0;
@@ -227,16 +236,6 @@ impl PulseSweepChannel {
     self.nr14 = 0;
 
     self.enabled = false;
-    self.frequency_timer = 0;
-    self.envelope_timer = 0;
-    self.length_timer = 0;
-    self.volume = 0;
-    self.duty_step = 0;
-
-    self.shadow_frequency = 0;
-    self.sweep_timer = 0;
-    self.sweep_enabled = false;
-    self.had_negative_sweep_calc = false;
   }
 
   /// Returns whether this sound channel is enabled.
