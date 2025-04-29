@@ -35,7 +35,7 @@ impl NoiseChannel {
       envelope_timer: 0,
       length_timer: 0,
 
-      lsfr: 0x7FFF,
+      lsfr: 0,
 
       enabled: false,
     }
@@ -44,6 +44,7 @@ impl NoiseChannel {
   /// Steps the noise channel.
   pub fn step(&mut self) {
     const LSFR_WIDTH_MODE_MASK: u8 = 0b000_1000;
+    const LSFR_SHORT_WIDTH_BIT: u8 = 6;
 
     if self.frequency_timer == 0 {
       self.frequency_timer = self.get_frequency();
@@ -53,9 +54,9 @@ impl NoiseChannel {
 
       self.lsfr = (self.lsfr >> 1) | (xor << 14);
 
-      // Set the 7th bit if in smaller width mode
+      // Set the 6th bit if in smaller width mode
       if is_flag_set!(self.nr43, LSFR_WIDTH_MODE_MASK) {
-        self.lsfr = (self.lsfr & 0b1111_1111_1011_1111) | xor;
+        self.lsfr = (self.lsfr & !(1 << LSFR_SHORT_WIDTH_BIT)) | (xor << LSFR_SHORT_WIDTH_BIT);
       }
     }
 
