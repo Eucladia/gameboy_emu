@@ -212,6 +212,8 @@ impl NoiseChannel {
       self.length_timer = MAX_CHANNEL_TIMER_LENGTH;
     }
 
+    self.frequency_timer = self.get_frequency();
+
     self.envelope_timer = self.nr42 & 0x07;
     self.volume = (self.nr42 >> 4) & 0x0F;
     self.lsfr = 0x7FFF;
