@@ -99,6 +99,8 @@ fn main() {
   // Pre-allocate and reuse this buffer to avoid a bunch of micro allocations.
   let mut text_buffer = String::with_capacity(TEXT_BUFFER_MAX_LENGTH);
 
+  audio_stream.play().unwrap();
+
   event_loop
     .run(move |event, elwt| {
       if limit_frames {
@@ -294,10 +296,6 @@ fn main() {
 
             buffer.copy_from_slice(&window_frame);
             buffer.present().unwrap();
-
-            if first_update {
-              audio_stream.play().unwrap();
-            }
 
             last_update = now;
             first_update = false;
