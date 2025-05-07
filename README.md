@@ -3,9 +3,8 @@
 </div>
 
 ## Motivation
-This project started as a way to learn more about emulator development, specifically the Gameboy and its internals. A key part of emulation is accurately replicating the CPU’s behavior, which requires understanding its instruction set.
-
-While working on this, I realized that modern Assembly can be pretty daunting for beginners due to its complexity. In contrast, the Gameboy’s Assembly language is smaller and much more approachable. So, I’d like this project to also serve as a learning resource – something that makes understanding the basics of Assembly a little less scary.
+This project started as a way to learn more about emulator development, specifically the Gameboy 
+and its internals.
 
 ## Installation
 ### Prerequisites
@@ -26,14 +25,10 @@ $ cd gameboy_emu
 $ cargo build --release
 ```
 
-### Running a ROM (Planned)
+### Running a ROM
 ```sh
 $ cargo run --release -- path/to/rom.gb
 ```
 > [!NOTE]
 >
-> This project is currently in an alpha state.
-> It is planned to support games that do **not** require a memory bank controller.
-
-## Assembly Guide
-TODO: Include rationale for this and a `guide` folder with learning resources.
+> Currently supported games are those up to MBC-1.
