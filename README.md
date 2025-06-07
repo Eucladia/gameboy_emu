@@ -2,10 +2,6 @@
   <h1>Gameboy Emulator</h1>
 </div>
 
-## Motivation
-This project started as a way to learn more about emulator development, specifically the Gameboy 
-and its internals.
-
 ## Installation
 ### Prerequisites
 To build and run this emulator, you need to have Rust installed. The minimum supported Rust version (MSRV) is **1.85**.
