@@ -3,37 +3,70 @@ use crate::{
   hardware::{
     Hardware,
     ppu::DmaTransfer,
-    registers::{Register, RegisterPair, Registers},
+    registers::{self, Registers},
   },
-  instructions::{Instruction, Operand},
   interrupts::Interrupt,
 };
+use macros::*;
 
 /// A state that the CPU can be in.
 #[derive(Debug, Copy, Clone)]
 pub enum CpuState {
-  /// The CPU was running.
+  /// The CPU is processing instructions.
   Running,
-  /// The CPU was marked as halted.
+  /// The CPU is halted.
   Halted,
-  /// The CPU was marked as stopped.
+  /// The CPU is stopped.
   Stopped,
+  /// The CPU is processing interrupts.
+  HandlingInterrupts,
 }
 
 #[derive(Debug)]
 pub struct Cpu {
-  /// The set flags.
+  /// The enabled flags.
   flags: u8,
-  /// The clock state.
-  clock: ClockState,
-  /// The registers.
+  /// The set of registers.
   pub registers: Registers,
   /// The state of the CPU.
   state: CpuState,
-  /// Whether the CPU is in a bugged halted state.
+  /// Whether the CPU is in a bugged halt state.
   halt_bug: bool,
   /// Master interrupt flag.
-  master_interrupt_enabled: bool,
+  interrupt_master_enabled: bool,
+  // The amount of T-cycles elapsed.
+  t_cycles: usize,
+
+  // Stuff for T-cycle accuracy
+  /// The current cycle of the CPU during execution.
+  cycle: CpuCycle,
+  /// Whether the CPU should handle interrupts on the next M-cycle.
+  should_handle_interrupts: bool,
+  /// Whether the next instruction should be parsed from the extended instruction set.
+  saw_prefix_opcode: bool,
+  /// The last executed instruction.
+  last_instruction: u8,
+  /// Whether the initial instruction was fetched.
+  initial_fetch: bool,
+  /// Temporary storage to store things in-between M-cycles when executing instructions.
+  data_buffer: [u8; 2],
+}
+
+/// A machine cycle when stepping the CPU's instruction or interrupt handler.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CpuCycle {
+  // Machine cycle 1.
+  M1,
+  // Machine cycle 2.
+  M2,
+  // Machine cycle 3.
+  M3,
+  // Machine cycle 4.
+  M4,
+  // Machine cycle 5.
+  M5,
+  // Machine cycle 6.
+  M6,
 }
 
 impl Cpu {
@@ -41,11 +74,18 @@ impl Cpu {
   pub fn new() -> Self {
     Self {
       flags: 0,
-      master_interrupt_enabled: false,
       state: CpuState::Running,
-      clock: ClockState::default(),
       registers: Registers::default(),
       halt_bug: false,
+      interrupt_master_enabled: false,
+      t_cycles: 0,
+
+      cycle: CpuCycle::M1,
+      should_handle_interrupts: false,
+      last_instruction: 0x00,
+      initial_fetch: false,
+      data_buffer: [0; 2],
+      saw_prefix_opcode: false,
     }
   }
 
@@ -58,1513 +98,7 @@ impl Cpu {
     cpu
   }
 
-  /// Executes one cycle, returning the number of T-cycles taken.
-  pub fn step(&mut self, hardware: &mut Hardware) -> usize {
-    let prev_opcode = self.registers.ir;
-    let instruction_byte = self.fetch_instruction(hardware);
-
-    self.registers.ir = instruction_byte;
-
-    let instruction = self.decode_instruction(instruction_byte, hardware);
-    // Subtract a byte since we accounted for the instruction byte itself already
-    let i_size = instruction.bytes_occupied() - 1;
-
-    self.registers.pc = self.registers.pc.wrapping_add(i_size as u16);
-
-    let before = self.clock.t_cycles;
-
-    self.execute_instruction(hardware, &instruction);
-
-    let cycles_taken = self.clock.t_cycles.wrapping_sub(before);
-
-    // The `EI` instruction has a delay of 4 T-cycles, so enable the master
-    // interrupt AFTER the execution of the next instruction
-    if prev_opcode == 0xFB {
-      self.master_interrupt_enabled = true;
-    }
-
-    cycles_taken
-  }
-
-  /// Fetches the next instruction byte.
-  pub fn fetch_instruction(&mut self, hardware: &Hardware) -> u8 {
-    // If we have a DMA transfer and we're not in high ram, then the next instruction
-    // byte being fetched is the current byte that is being transferred by the DMA controller
-    let next_byte = match hardware.get_dma_transfer() {
-      Some(DmaTransfer::Transferring { current_pos: index }) if self.registers.pc < 0xFF80 => {
-        // The program counter is still incremented in this case
-        self.registers.pc = self.registers.pc.wrapping_add(1);
-
-        (*index as u16) << 8
-      }
-      _ => {
-        let current_pc = self.registers.pc;
-
-        // Don't increment the program counter when we're in a bugged halted state
-        if self.halt_bug {
-          self.halt_bug = false;
-        } else {
-          self.registers.pc = self.registers.pc.wrapping_add(1);
-        }
-
-        current_pc
-      }
-    };
-
-    hardware.read_byte(next_byte)
-  }
-
-  /// Executes the [`Instruction`], updating the internal clock state.
-  pub fn execute_instruction(&mut self, hardware: &mut Hardware, instruction: &Instruction) {
-    use Instruction::*;
-
-    match instruction {
-      &LD(Operand::Register(dest), Operand::Register(src)) => {
-        let value = self.read_register(hardware, src);
-        self.write_register(hardware, dest, value);
-        self.clock.tick();
-
-        // Add another machine cycle if we fetched or wrote to memory
-        if matches!(dest, Register::M) || matches!(src, Register::M) {
-          self.clock.tick();
-        }
-      }
-      &LD(Operand::RegisterPair(rp), Operand::Word(value)) => {
-        self.write_register_pair(rp, value);
-        self.clock.advance(3);
-      }
-      &LD(Operand::RegisterPairMemory(rp), Operand::Register(Register::A)) => {
-        hardware.write_byte(self.read_register_pair(rp), self.registers.a);
-        self.clock.advance(2);
-      }
-      &LD(Operand::Register(Register::A), Operand::RegisterPairMemory(rp)) => {
-        self.registers.a = hardware.read_byte(self.read_register_pair(rp));
-        self.clock.advance(2);
-      }
-      &LD(Operand::MemoryAddress(value), Operand::RegisterPair(RegisterPair::SP)) => {
-        let lower = (self.registers.sp & 0xFF) as u8;
-        let upper = ((self.registers.sp & 0xFF00) >> 8) as u8;
-
-        hardware.write_byte(value, lower);
-        hardware.write_byte(value.wrapping_add(1), upper);
-
-        self.clock.advance(5);
-      }
-      &LD(Operand::Register(dest), Operand::Byte(value)) => {
-        self.write_register(hardware, dest, value);
-        self.clock.advance(2);
-
-        // Add another machine cycle if we wrote to memory
-        if matches!(dest, Register::M) {
-          self.clock.tick();
-        }
-      }
-      &LD(Operand::RegisterPair(RegisterPair::HL), Operand::StackOffset(offset)) => {
-        // The offset can be negative, so do a sign-extend add.
-        let offset = offset as i8 as u16;
-        let sp = self.registers.sp;
-        let result = sp.wrapping_add(offset);
-
-        self.registers.h = ((result & 0xFF00) >> 8) as u8;
-        self.registers.l = (result & 0xFF) as u8;
-
-        self.toggle_flag(Flag::Z, false);
-        self.toggle_flag(Flag::N, false);
-        self.toggle_flag(Flag::H, (sp & 0x0F) as u8 + ((offset as u8) & 0x0F) > 0x0F);
-        self.toggle_flag(Flag::C, ((sp & 0xFF) + (offset & 0xFF)) > 0xFF);
-
-        self.clock.advance(3);
-      }
-      LD(Operand::RegisterPair(RegisterPair::SP), Operand::RegisterPair(RegisterPair::HL)) => {
-        self.registers.sp = ((self.registers.h as u16) << 8) | self.registers.l as u16;
-        self.clock.advance(2);
-      }
-      &LD(Operand::MemoryAddress(address), Operand::Register(Register::A)) => {
-        hardware.write_byte(address, self.registers.a);
-        self.clock.advance(4);
-      }
-      &LD(Operand::Register(Register::A), Operand::MemoryAddress(address)) => {
-        self.registers.a = hardware.read_byte(address);
-        self.clock.advance(4);
-      }
-
-      LDI(Operand::RegisterPairMemory(RegisterPair::HL), Operand::Register(Register::A)) => {
-        let address = ((self.registers.h as u16) << 8) | self.registers.l as u16;
-
-        hardware.write_byte(address, self.registers.a);
-
-        let res = address.wrapping_add(1);
-
-        self.registers.h = ((res >> 8) & 0xFF) as u8;
-        self.registers.l = (res & 0xFF) as u8;
-
-        self.clock.advance(2);
-      }
-      LDI(Operand::Register(Register::A), Operand::RegisterPairMemory(RegisterPair::HL)) => {
-        let address = ((self.registers.h as u16) << 8) | self.registers.l as u16;
-        let value = hardware.read_byte(address);
-
-        self.registers.a = value;
-
-        let res = address.wrapping_add(1);
-
-        self.registers.h = ((res >> 8) & 0xFF) as u8;
-        self.registers.l = (res & 0xFF) as u8;
-
-        self.clock.advance(2);
-      }
-      LDD(Operand::RegisterPairMemory(RegisterPair::HL), Operand::Register(Register::A)) => {
-        let address = ((self.registers.h as u16) << 8) | self.registers.l as u16;
-
-        hardware.write_byte(address, self.registers.a);
-
-        let res = address.wrapping_sub(1);
-
-        self.registers.h = ((res >> 8) & 0xFF) as u8;
-        self.registers.l = (res & 0xFF) as u8;
-
-        self.clock.advance(2);
-      }
-      LDD(Operand::Register(Register::A), Operand::RegisterPairMemory(RegisterPair::HL)) => {
-        let address = ((self.registers.h as u16) << 8) | self.registers.l as u16;
-        let value = hardware.read_byte(address);
-
-        self.registers.a = value;
-
-        let res = address.wrapping_sub(1);
-
-        self.registers.h = ((res >> 8) & 0xFF) as u8;
-        self.registers.l = (res & 0xFF) as u8;
-
-        self.clock.advance(2);
-      }
-      &LDH(Operand::HighMemoryByte(value), Operand::Register(Register::A)) => {
-        hardware.write_byte(0xFF00 + value as u16, self.registers.a);
-        self.clock.advance(3);
-      }
-      &LDH(Operand::Register(Register::A), Operand::HighMemoryByte(value)) => {
-        self.registers.a = hardware.read_byte(0xFF00 + value as u16);
-        self.clock.advance(3);
-      }
-      LDH(Operand::HighMemoryRegister(Register::C), Operand::Register(Register::A)) => {
-        hardware.write_byte(0xFF00 + self.registers.c as u16, self.registers.a);
-        self.clock.advance(2);
-      }
-      LDH(Operand::Register(Register::A), Operand::HighMemoryRegister(Register::C)) => {
-        self.registers.a = hardware.read_byte(0xFF00 + self.registers.c as u16);
-        self.clock.advance(2);
-      }
-
-      &ADC(Operand::Register(Register::A), Operand::Register(src)) => {
-        let a_value = self.registers.a;
-        let is_carry_set = is_flag_set!(self.flags, Flag::C as u8);
-        let reg_value = self.read_register(hardware, src);
-        let res = a_value
-          .wrapping_add(reg_value)
-          .wrapping_add(is_carry_set as u8);
-
-        self.registers.a = res;
-
-        self.toggle_flag(Flag::Z, res == 0);
-        self.toggle_flag(Flag::N, false);
-        self.toggle_flag(
-          Flag::H,
-          (a_value & 0x0F) + (reg_value & 0x0F) + (is_carry_set as u8 & 0x0F) > 0x0F,
-        );
-        self.toggle_flag(
-          Flag::C,
-          (a_value as u16 + reg_value as u16 + is_carry_set as u16) > 0xFF,
-        );
-
-        self.clock.tick();
-
-        // Add another machine cycle if we fetched memory
-        if matches!(src, Register::M) {
-          self.clock.tick();
-        }
-      }
-      &ADC(Operand::Register(Register::A), Operand::Byte(byte)) => {
-        let a_value = self.registers.a;
-        let is_carry_set = is_flag_set!(self.flags, Flag::C as u8);
-        let res = a_value.wrapping_add(byte).wrapping_add(is_carry_set as u8);
-
-        self.registers.a = res;
-
-        self.toggle_flag(Flag::Z, res == 0);
-        self.toggle_flag(Flag::N, false);
-        self.toggle_flag(
-          Flag::H,
-          (a_value & 0x0F) + (byte & 0x0F) + (is_carry_set as u8 & 0x0F) > 0x0F,
-        );
-        self.toggle_flag(
-          Flag::C,
-          (a_value as u16 + byte as u16 + is_carry_set as u16) > 0xFF,
-        );
-
-        self.clock.advance(2);
-      }
-      &ADD(Operand::Register(Register::A), Operand::Register(src)) => {
-        let a_value = self.registers.a;
-        let reg_value = self.read_register(hardware, src);
-        let res = a_value.wrapping_add(reg_value);
-
-        self.registers.a = res;
-
-        self.toggle_flag(Flag::Z, res == 0);
-        self.toggle_flag(Flag::N, false);
-        self.toggle_flag(Flag::H, (a_value & 0x0F) + (reg_value & 0x0F) > 0x0F);
-        self.toggle_flag(Flag::C, (a_value as u16 + reg_value as u16) > 0xFF);
-
-        self.clock.tick();
-
-        // Add another machine cycle if we fetched memory
-        if matches!(src, Register::M) {
-          self.clock.tick();
-        }
-      }
-      &ADD(Operand::Register(Register::A), Operand::Byte(byte)) => {
-        let a_value = self.registers.a;
-        let res = a_value.wrapping_add(byte);
-
-        self.registers.a = res;
-
-        self.toggle_flag(Flag::Z, res == 0);
-        self.toggle_flag(Flag::N, false);
-        self.toggle_flag(Flag::H, (a_value & 0x0F) + (byte & 0x0F) > 0x0F);
-        self.toggle_flag(Flag::C, (a_value as u16 + byte as u16) > 0xFF);
-
-        self.clock.advance(2);
-      }
-      &ADD(Operand::RegisterPair(RegisterPair::HL), Operand::RegisterPair(src)) => {
-        let hl_value = ((self.registers.h as u16) << 8) | self.registers.l as u16;
-        let rp_value = self.read_register_pair(src);
-        let res = hl_value.wrapping_add(rp_value);
-
-        self.registers.h = ((res >> 8) & 0xFF) as u8;
-        self.registers.l = (res & 0xFF) as u8;
-
-        self.toggle_flag(Flag::N, false);
-        self.toggle_flag(Flag::H, (hl_value & 0x0FFF) + (rp_value & 0x0FFF) > 0x0FFF);
-        self.toggle_flag(Flag::C, res < hl_value);
-
-        self.clock.advance(2);
-      }
-      &ADD(Operand::RegisterPair(RegisterPair::SP), Operand::Byte(value)) => {
-        // Sign extend the number
-        let num = value as i8 as u16;
-        let sp_value = self.registers.sp;
-
-        self.registers.sp = sp_value.wrapping_add(num);
-
-        self.toggle_flag(Flag::Z, false);
-        self.toggle_flag(Flag::N, false);
-        self.toggle_flag(Flag::H, (sp_value & 0x0F) + (num & 0x0F) > 0x0F);
-        self.toggle_flag(Flag::C, (sp_value & 0xFF) + (num & 0xFF) > 0xFF);
-
-        self.clock.advance(4);
-      }
-      &AND(Operand::Register(Register::A), Operand::Register(src_reg)) => {
-        let src_value = self.read_register(hardware, src_reg);
-        let res = self.registers.a & src_value;
-
-        self.registers.a = res;
-
-        self.toggle_flag(Flag::Z, res == 0);
-        self.toggle_flag(Flag::N, false);
-        self.toggle_flag(Flag::H, true);
-        self.toggle_flag(Flag::C, false);
-
-        self.clock.tick();
-
-        // Add another machine cycle if we fetched memory
-        if matches!(src_reg, Register::M) {
-          self.clock.tick();
-        }
-      }
-      &AND(Operand::Register(Register::A), Operand::Byte(value)) => {
-        let res = self.registers.a & value;
-
-        self.registers.a = res;
-
-        self.toggle_flag(Flag::Z, res == 0);
-        self.toggle_flag(Flag::N, false);
-        self.toggle_flag(Flag::H, true);
-        self.toggle_flag(Flag::C, false);
-
-        self.clock.advance(2);
-      }
-      &CP(Operand::Register(Register::A), Operand::Register(src_reg)) => {
-        let src_value = self.read_register(hardware, src_reg);
-        let res = self.registers.a.wrapping_sub(src_value);
-
-        self.clock.tick();
-
-        self.toggle_flag(Flag::Z, res == 0);
-        self.toggle_flag(Flag::N, true);
-        self.toggle_flag(Flag::H, (self.registers.a & 0x0F) < (src_value & 0x0F));
-        self.toggle_flag(Flag::C, self.registers.a < src_value);
-
-        // Add another machine cycle if  we fetched memory
-        if matches!(src_reg, Register::M) {
-          self.clock.tick();
-        }
-      }
-      &CP(Operand::Register(Register::A), Operand::Byte(value)) => {
-        let res = self.registers.a.wrapping_sub(value);
-
-        self.toggle_flag(Flag::Z, res == 0);
-        self.toggle_flag(Flag::N, true);
-        self.toggle_flag(Flag::H, (self.registers.a & 0x0F) < (value & 0x0F));
-        self.toggle_flag(Flag::C, self.registers.a < value);
-
-        self.clock.advance(2);
-      }
-      &DEC(Operand::Register(reg)) => {
-        let reg_value = self.read_register(hardware, reg);
-        let res = reg_value.wrapping_sub(1);
-
-        self.write_register(hardware, reg, res);
-
-        self.toggle_flag(Flag::Z, res == 0);
-        self.toggle_flag(Flag::N, true);
-        self.toggle_flag(Flag::H, (reg_value & 0x0F) < 1);
-
-        self.clock.tick();
-
-        // Add 2 machine cycles if we fetched and wrote to memory
-        if matches!(reg, Register::M) {
-          self.clock.advance(2);
-        }
-      }
-      &DEC(Operand::RegisterPair(rp)) => {
-        let reg_value = self.read_register_pair(rp);
-        let res = reg_value.wrapping_sub(1);
-
-        self.write_register_pair(rp, res);
-        self.clock.advance(2);
-      }
-      &INC(Operand::Register(reg)) => {
-        let reg_value = self.read_register(hardware, reg);
-        let res = reg_value.wrapping_add(1);
-
-        self.write_register(hardware, reg, res);
-
-        self.toggle_flag(Flag::Z, res == 0);
-        self.toggle_flag(Flag::N, false);
-        self.toggle_flag(Flag::H, (reg_value & 0x0F) == 0x0F);
-
-        self.clock.tick();
-
-        // Add 2 machine cycles if we fetched and wrote to memory
-        if matches!(reg, Register::M) {
-          self.clock.advance(2);
-        }
-      }
-      &INC(Operand::RegisterPair(rp)) => {
-        let reg_value = self.read_register_pair(rp);
-        let res = reg_value.wrapping_add(1);
-
-        self.write_register_pair(rp, res);
-        self.clock.advance(2);
-      }
-      &OR(Operand::Register(Register::A), Operand::Register(reg)) => {
-        let reg_value = self.read_register(hardware, reg);
-        let res = self.registers.a | reg_value;
-
-        self.registers.a = res;
-
-        self.toggle_flag(Flag::Z, res == 0);
-        self.toggle_flag(Flag::N, false);
-        self.toggle_flag(Flag::H, false);
-        self.toggle_flag(Flag::C, false);
-
-        self.clock.tick();
-
-        // Add another machine cycle if we fetched memory
-        if matches!(reg, Register::M) {
-          self.clock.tick();
-        }
-      }
-      &OR(Operand::Register(Register::A), Operand::Byte(value)) => {
-        let res = self.registers.a | value;
-
-        self.registers.a = res;
-
-        self.toggle_flag(Flag::Z, res == 0);
-        self.toggle_flag(Flag::N, false);
-        self.toggle_flag(Flag::H, false);
-        self.toggle_flag(Flag::C, false);
-
-        self.clock.advance(2);
-      }
-      &SBC(Operand::Register(Register::A), Operand::Register(reg)) => {
-        let is_carry_set = is_flag_set!(self.flags, Flag::C as u8) as u8;
-        let reg_value = self.read_register(hardware, reg);
-        let a_value = self.registers.a;
-        let res = a_value.wrapping_sub(reg_value).wrapping_sub(is_carry_set);
-
-        self.registers.a = res;
-
-        self.toggle_flag(Flag::Z, res == 0);
-        self.toggle_flag(Flag::N, true);
-        self.toggle_flag(
-          Flag::H,
-          (a_value & 0x0F) < ((reg_value & 0x0F) + is_carry_set),
-        );
-        self.toggle_flag(
-          Flag::C,
-          (a_value as u16) < (reg_value as u16 + is_carry_set as u16),
-        );
-
-        self.clock.tick();
-
-        // Add another machine cycle if we fetched memory
-        if matches!(reg, Register::M) {
-          self.clock.tick();
-        }
-      }
-      &SBC(Operand::Register(Register::A), Operand::Byte(value)) => {
-        let is_carry_set = is_flag_set!(self.flags, Flag::C as u8) as u8;
-        let a_value = self.registers.a;
-        let res = a_value.wrapping_sub(value).wrapping_sub(is_carry_set);
-
-        self.registers.a = res;
-
-        self.toggle_flag(Flag::Z, res == 0);
-        self.toggle_flag(Flag::N, true);
-        self.toggle_flag(Flag::H, (a_value & 0x0F) < ((value & 0x0F) + is_carry_set));
-        self.toggle_flag(
-          Flag::C,
-          (a_value as u16) < (value as u16 + is_carry_set as u16),
-        );
-
-        self.clock.advance(2);
-      }
-      &SUB(Operand::Register(Register::A), Operand::Register(reg)) => {
-        let reg_value = self.read_register(hardware, reg);
-        let a_value = self.registers.a;
-        let res = a_value.wrapping_sub(reg_value);
-
-        self.registers.a = res;
-
-        self.toggle_flag(Flag::Z, res == 0);
-        self.toggle_flag(Flag::N, true);
-        self.toggle_flag(Flag::H, (a_value & 0x0F) < (reg_value & 0x0F));
-        self.toggle_flag(Flag::C, a_value < reg_value);
-
-        self.clock.tick();
-
-        // Add another machine cycle if we fetched memory
-        if matches!(reg, Register::M) {
-          self.clock.tick();
-        }
-      }
-      &SUB(Operand::Register(Register::A), Operand::Byte(value)) => {
-        let a_value = self.registers.a;
-        let res = a_value.wrapping_sub(value);
-
-        self.registers.a = res;
-
-        self.toggle_flag(Flag::Z, res == 0);
-        self.toggle_flag(Flag::N, true);
-        self.toggle_flag(Flag::H, (a_value & 0x0F) < (value & 0x0F));
-        self.toggle_flag(Flag::C, a_value < value);
-
-        self.clock.advance(2);
-      }
-      &XOR(Operand::Register(Register::A), Operand::Register(reg)) => {
-        let reg_value = self.read_register(hardware, reg);
-        let res = self.registers.a ^ reg_value;
-
-        self.registers.a = res;
-
-        self.toggle_flag(Flag::Z, res == 0);
-        self.toggle_flag(Flag::N, false);
-        self.toggle_flag(Flag::H, false);
-        self.toggle_flag(Flag::C, false);
-
-        self.clock.tick();
-
-        // Add another machine cycle if we fetched memory
-        if matches!(reg, Register::M) {
-          self.clock.tick();
-        }
-      }
-      &XOR(Operand::Register(Register::A), Operand::Byte(value)) => {
-        let res = self.registers.a ^ value;
-
-        self.registers.a = res;
-
-        self.toggle_flag(Flag::Z, res == 0);
-        self.toggle_flag(Flag::N, false);
-        self.toggle_flag(Flag::H, false);
-        self.toggle_flag(Flag::C, false);
-
-        self.clock.advance(2);
-      }
-      DAA => {
-        let mut correction = 0;
-
-        let subtracted = is_flag_set!(self.flags, Flag::N as u8);
-        let half_carried = is_flag_set!(self.flags, Flag::H as u8);
-        let mut carried = is_flag_set!(self.flags, Flag::C as u8);
-
-        // Check the lower nibble
-        if half_carried || (!subtracted && (self.registers.a & 0x0F) > 0x09) {
-          correction |= 0x06;
-        }
-
-        // Check the upper nibble
-        if carried || (!subtracted && self.registers.a > 0x99) {
-          correction |= 0x60;
-          carried = true;
-        }
-
-        let res = if subtracted {
-          self.registers.a.wrapping_sub(correction)
-        } else {
-          self.registers.a.wrapping_add(correction)
-        };
-
-        self.registers.a = res;
-
-        self.toggle_flag(Flag::Z, res == 0);
-        self.toggle_flag(Flag::H, false);
-        self.toggle_flag(Flag::C, carried);
-
-        self.clock.tick();
-      }
-
-      &CALL(Some(Operand::Conditional(flag)), Operand::Word(address)) => {
-        let should_jump = self.is_conditional_flag_set(flag);
-
-        if should_jump {
-          self.push_stack_word(hardware, self.registers.pc);
-
-          self.registers.pc = address;
-          self.clock.advance(6);
-        } else {
-          self.clock.advance(3);
-        }
-      }
-      &CALL(None, Operand::Word(address)) => {
-        self.push_stack_word(hardware, self.registers.pc);
-
-        self.registers.pc = address;
-        self.clock.advance(6);
-      }
-      &JP(Some(Operand::Conditional(flag)), Operand::Word(address)) => {
-        let should_jump = self.is_conditional_flag_set(flag);
-
-        if should_jump {
-          self.registers.pc = address;
-          self.clock.advance(4);
-        } else {
-          self.clock.advance(3);
-        }
-      }
-      &JP(None, Operand::Word(address)) => {
-        self.registers.pc = address;
-        self.clock.advance(4);
-      }
-      JP(None, Operand::RegisterPair(RegisterPair::HL)) => {
-        let address = ((self.registers.h as u16) << 8) | self.registers.l as u16;
-
-        self.registers.pc = address;
-        self.clock.tick();
-      }
-      &JR(Some(Operand::Conditional(flag)), Operand::Byte(offset)) => {
-        let should_jump = self.is_conditional_flag_set(flag);
-
-        if should_jump {
-          // The byte can be negative, so sign-extend add the value
-          self.registers.pc = self.registers.pc.wrapping_add(offset as i8 as u16);
-          self.clock.advance(3);
-        } else {
-          self.clock.advance(2);
-        }
-      }
-      &JR(None, Operand::Byte(offset)) => {
-        // The byte can be negative, so sign-extend add the value
-        self.registers.pc = self.registers.pc.wrapping_add(offset as i8 as u16);
-        self.clock.advance(3);
-      }
-      &RET(Some(Operand::Conditional(flag))) => {
-        let should_jump = self.is_conditional_flag_set(flag);
-
-        if should_jump {
-          let addr = self.pop_stack_word(hardware);
-
-          self.registers.pc = addr;
-          self.clock.advance(5);
-        } else {
-          self.clock.advance(2);
-        }
-      }
-      RET(None) => {
-        let addr = self.pop_stack_word(hardware);
-
-        self.registers.pc = addr;
-        self.clock.advance(4);
-      }
-      RETI => {
-        let addr = self.pop_stack_word(hardware);
-
-        self.registers.pc = addr;
-        self.master_interrupt_enabled = true;
-        self.clock.advance(4);
-      }
-      &RST(Operand::Byte(target)) => {
-        self.push_stack_word(hardware, self.registers.pc);
-
-        self.registers.pc = target as u16;
-        self.clock.advance(4);
-      }
-      STOP(Operand::Byte(_)) => {
-        self.state = CpuState::Stopped;
-        self.clock.tick();
-      }
-      HALT => {
-        // The Gameboy has a hardware bug when executing the `HALT` instruction.
-        //
-        // That is, when the master interrupt flag isn't enabled and the program
-        // tries to halt while there is an interrupt pending, it will fail to
-        // halt and enter a bugged state.
-        //
-        // In this bugged state, the program counter is NOT incremented after
-        // fetching the next byte.
-        //
-        // See https://gbdev.io/pandocs/halt.html for more.
-        if !self.master_interrupt_enabled && hardware.has_pending_interrupts() {
-          self.halt_bug = true;
-          // The CPU doesn't actually enter a halted state in the case of a bugged
-          // halt instruction.
-          self.state = CpuState::Running;
-        } else {
-          self.state = CpuState::Halted;
-        }
-
-        self.clock.tick();
-      }
-      NOP => {
-        self.clock.tick();
-      }
-
-      &POP(Operand::RegisterPair(rp)) => {
-        let value = self.pop_stack_word(hardware);
-
-        self.write_register_pair(rp, value);
-
-        self.clock.advance(3);
-      }
-      &PUSH(Operand::RegisterPair(rp)) => {
-        let reg_value = self.read_register_pair(rp);
-
-        self.push_stack_word(hardware, reg_value);
-
-        self.clock.advance(4);
-      }
-      CCF => {
-        self.toggle_flag(Flag::N, false);
-        self.toggle_flag(Flag::H, false);
-        self.toggle_flag(Flag::C, !is_flag_set!(self.flags, Flag::C as u8));
-
-        self.clock.tick();
-      }
-      CPL => {
-        self.registers.a = !self.registers.a;
-
-        self.toggle_flag(Flag::N, true);
-        self.toggle_flag(Flag::H, true);
-
-        self.clock.tick();
-      }
-      DI => {
-        self.master_interrupt_enabled = false;
-        self.clock.tick();
-      }
-      EI => {
-        // We shouldn't actually update the master interrupt flag immediately
-        // because this instruction seems to have a delay of 4 T-cycles
-        self.clock.tick();
-      }
-      SCF => {
-        self.toggle_flag(Flag::N, false);
-        self.toggle_flag(Flag::H, false);
-        self.toggle_flag(Flag::C, true);
-
-        self.clock.tick();
-      }
-
-      RLA => {
-        let is_carry_set = is_flag_set!(self.flags, Flag::C as u8);
-        let a_value = self.registers.a;
-        let res = (a_value << 1) | (is_carry_set as u8);
-
-        self.registers.a = res;
-
-        self.toggle_flag(Flag::Z, false);
-        self.toggle_flag(Flag::N, false);
-        self.toggle_flag(Flag::H, false);
-        self.toggle_flag(Flag::C, (a_value >> 7) == 0x1);
-
-        self.clock.tick();
-      }
-      RLCA => {
-        let a_value = self.registers.a;
-        let res = a_value.rotate_left(1);
-
-        self.registers.a = res;
-
-        self.toggle_flag(Flag::Z, false);
-        self.toggle_flag(Flag::N, false);
-        self.toggle_flag(Flag::H, false);
-        self.toggle_flag(Flag::C, (a_value >> 7) == 0x1);
-
-        self.clock.tick();
-      }
-      RRA => {
-        let is_carry_set = is_flag_set!(self.flags, Flag::C as u8);
-        let a_value = self.registers.a;
-        let res = (a_value >> 1) | ((is_carry_set as u8) << 7);
-
-        self.registers.a = res;
-
-        self.toggle_flag(Flag::Z, false);
-        self.toggle_flag(Flag::N, false);
-        self.toggle_flag(Flag::H, false);
-        self.toggle_flag(Flag::C, (a_value & 0x1) == 1);
-
-        self.clock.tick();
-      }
-      RRCA => {
-        let a_value = self.registers.a;
-        let res = a_value.rotate_right(1);
-
-        self.registers.a = res;
-
-        self.toggle_flag(Flag::Z, false);
-        self.toggle_flag(Flag::N, false);
-        self.toggle_flag(Flag::H, false);
-        self.toggle_flag(Flag::C, (a_value & 0x1) == 1);
-
-        self.clock.tick();
-      }
-
-      &BIT(Operand::Byte(bit), Operand::Register(reg)) => {
-        let reg_value = self.read_register(hardware, reg);
-        let extracted_bit = (reg_value >> bit) & 1;
-
-        self.toggle_flag(Flag::Z, extracted_bit == 0);
-        self.toggle_flag(Flag::N, false);
-        self.toggle_flag(Flag::H, true);
-
-        self.clock.advance(2);
-
-        // Add another machine cycle if we fetched memory
-        if matches!(reg, Register::M) {
-          self.clock.tick();
-        }
-      }
-      &RES(Operand::Byte(bit), Operand::Register(reg)) => {
-        let reg_value = self.read_register(hardware, reg);
-        let new_value = reg_value & !(1 << bit);
-
-        self.write_register(hardware, reg, new_value);
-        self.clock.advance(2);
-
-        // Advance 2 machine cycles since we fetched and wrote to memory
-        if matches!(reg, Register::M) {
-          self.clock.advance(2);
-        }
-      }
-      &SET(Operand::Byte(bit), Operand::Register(reg)) => {
-        let reg_value = self.read_register(hardware, reg);
-        let new_value = reg_value | (1 << bit);
-
-        self.write_register(hardware, reg, new_value);
-        self.clock.advance(2);
-
-        if matches!(reg, Register::M) {
-          self.clock.advance(2);
-        }
-      }
-      &RL(Operand::Register(reg)) => {
-        let reg_value = self.read_register(hardware, reg);
-        let is_carry_set = is_flag_set!(self.flags, Flag::C as u8) as u8;
-        let res = (reg_value << 1) | is_carry_set;
-
-        self.write_register(hardware, reg, res);
-
-        self.toggle_flag(Flag::Z, res == 0);
-        self.toggle_flag(Flag::N, false);
-        self.toggle_flag(Flag::H, false);
-        self.toggle_flag(Flag::C, (reg_value >> 7) == 1);
-
-        self.clock.advance(2);
-
-        // Add 2 machine cycles if we fetched and wrote to memory
-        if matches!(reg, Register::M) {
-          self.clock.advance(2);
-        }
-      }
-      &RLC(Operand::Register(reg)) => {
-        let reg_value = self.read_register(hardware, reg);
-        let res = reg_value.rotate_left(1);
-
-        self.write_register(hardware, reg, res);
-
-        self.toggle_flag(Flag::Z, res == 0);
-        self.toggle_flag(Flag::N, false);
-        self.toggle_flag(Flag::H, false);
-        self.toggle_flag(Flag::C, (reg_value >> 7) == 1);
-
-        self.clock.advance(2);
-
-        // Add 2 machine cycles if we fetched and wrote to memory
-        if matches!(reg, Register::M) {
-          self.clock.advance(2);
-        }
-      }
-      &RR(Operand::Register(reg)) => {
-        let reg_value = self.read_register(hardware, reg);
-        let is_carry_set = is_flag_set!(self.flags, Flag::C as u8) as u8;
-        let res = (reg_value >> 1) | (is_carry_set << 7);
-
-        self.write_register(hardware, reg, res);
-
-        self.toggle_flag(Flag::Z, res == 0);
-        self.toggle_flag(Flag::N, false);
-        self.toggle_flag(Flag::H, false);
-        self.toggle_flag(Flag::C, (reg_value & 0x1) == 1);
-
-        self.clock.advance(2);
-
-        // Add 2 machine cycles if we fetched and wrote to memory
-        if matches!(reg, Register::M) {
-          self.clock.advance(2);
-        }
-      }
-      &RRC(Operand::Register(reg)) => {
-        let reg_value = self.read_register(hardware, reg);
-        let res = reg_value.rotate_right(1);
-
-        self.write_register(hardware, reg, res);
-
-        self.toggle_flag(Flag::Z, res == 0);
-        self.toggle_flag(Flag::N, false);
-        self.toggle_flag(Flag::H, false);
-        self.toggle_flag(Flag::C, (reg_value & 0x1) == 1);
-
-        self.clock.advance(2);
-
-        // Add 2 machine cycles if we fetched and wrote to memory
-        if matches!(reg, Register::M) {
-          self.clock.advance(2);
-        }
-      }
-      &SLA(Operand::Register(reg)) => {
-        let reg_value = self.read_register(hardware, reg);
-        let res = reg_value << 1;
-
-        self.write_register(hardware, reg, res);
-
-        self.toggle_flag(Flag::Z, res == 0);
-        self.toggle_flag(Flag::N, false);
-        self.toggle_flag(Flag::H, false);
-        self.toggle_flag(Flag::C, (reg_value >> 7) == 1);
-
-        self.clock.advance(2);
-
-        // Add 2 machine cycles if we fetched and wrote to memory
-        if matches!(reg, Register::M) {
-          self.clock.advance(2);
-        }
-      }
-      &SRA(Operand::Register(reg)) => {
-        let reg_value = self.read_register(hardware, reg);
-        // SRA preserves the sign bit (MSB)
-        let res = (reg_value >> 1) | (reg_value & 0x80);
-
-        self.write_register(hardware, reg, res);
-
-        self.toggle_flag(Flag::Z, res == 0);
-        self.toggle_flag(Flag::N, false);
-        self.toggle_flag(Flag::H, false);
-        self.toggle_flag(Flag::C, (reg_value & 0x1) == 1);
-
-        self.clock.advance(2);
-
-        // Add 2 machine cycles if we fetched and wrote to memory
-        if matches!(reg, Register::M) {
-          self.clock.advance(2);
-        }
-      }
-      &SRL(Operand::Register(reg)) => {
-        let reg_value = self.read_register(hardware, reg);
-        let res = reg_value >> 1;
-
-        self.write_register(hardware, reg, res);
-
-        self.toggle_flag(Flag::Z, res == 0);
-        self.toggle_flag(Flag::N, false);
-        self.toggle_flag(Flag::H, false);
-        self.toggle_flag(Flag::C, (reg_value & 0x1) == 1);
-
-        self.clock.advance(2);
-
-        // Add 2 machine cycles if we fetched and wrote to memory
-        if matches!(reg, Register::M) {
-          self.clock.advance(2);
-        }
-      }
-      &SWAP(Operand::Register(reg)) => {
-        let reg_value = self.read_register(hardware, reg);
-        let lower = reg_value & 0x0F;
-        let upper = reg_value & 0xF0;
-        let res = (lower << 4) | (upper >> 4);
-
-        self.write_register(hardware, reg, res);
-
-        self.toggle_flag(Flag::Z, res == 0);
-        self.toggle_flag(Flag::N, false);
-        self.toggle_flag(Flag::H, false);
-        self.toggle_flag(Flag::C, false);
-
-        self.clock.advance(2);
-
-        // Add 2 machine cycles if we fetched and wrote to memory
-        if matches!(reg, Register::M) {
-          self.clock.advance(2);
-        }
-      }
-      x => panic!("missing instruction execution for {:?}", x),
-    }
-  }
-
-  /// Decodes a byte into an [`Instruction`].
-  pub fn decode_instruction(&self, byte: u8, hardware: &Hardware) -> Instruction {
-    match byte {
-      // LD r8, r8
-      0x40..0x76 | 0x77..=0x7F => {
-        let dest_reg = Register::from_bits((byte >> 3) & 0x7).unwrap();
-        let src_reg = Register::from_bits(byte & 0x7).unwrap();
-
-        Instruction::LD(Operand::Register(dest_reg), Operand::Register(src_reg))
-      }
-      // LD r16, n16
-      0x01 | 0x11 | 0x21 | 0x31 => {
-        let r16 = RegisterPair::from_bits((byte >> 4) & 0x3, false).unwrap();
-        let n16 = hardware.read_word(self.registers.pc);
-
-        Instruction::LD(Operand::RegisterPair(r16), Operand::Word(n16))
-      }
-      // LD [r16], A
-      0x02 | 0x12 => {
-        let dest_reg_pair = if byte == 0x02 {
-          RegisterPair::BC
-        } else {
-          RegisterPair::DE
-        };
-
-        Instruction::LD(
-          Operand::RegisterPairMemory(dest_reg_pair),
-          Operand::Register(Register::A),
-        )
-      }
-      // LD A, [r16]
-      0x0A | 0x1A => {
-        let src_reg_pair = if byte == 0x0A {
-          RegisterPair::BC
-        } else {
-          RegisterPair::DE
-        };
-
-        Instruction::LD(
-          Operand::Register(Register::A),
-          Operand::RegisterPairMemory(src_reg_pair),
-        )
-      }
-      // LD [a16], SP
-      0x08 => {
-        let n16 = hardware.read_word(self.registers.pc);
-
-        Instruction::LD(
-          Operand::MemoryAddress(n16),
-          Operand::RegisterPair(RegisterPair::SP),
-        )
-      }
-      // LD r8 | [HL], n8
-      0x06 | 0x16 | 0x26 | 0x36 | 0x0E | 0x1E | 0x2E | 0x3E => {
-        let dest_reg = Register::from_bits((byte >> 3) & 0x7).unwrap();
-        let n8 = hardware.read_byte(self.registers.pc);
-
-        Instruction::LD(Operand::Register(dest_reg), Operand::Byte(n8))
-      }
-      // LD HL, SP + n8
-      0xF8 => {
-        let n8 = hardware.read_byte(self.registers.pc);
-
-        Instruction::LD(
-          Operand::RegisterPair(RegisterPair::HL),
-          Operand::StackOffset(n8),
-        )
-      }
-      // LD SP, HL
-      0xF9 => Instruction::LD(
-        Operand::RegisterPair(RegisterPair::SP),
-        Operand::RegisterPair(RegisterPair::HL),
-      ),
-      // LD [n16], A
-      0xEA => {
-        let n16 = hardware.read_word(self.registers.pc);
-
-        Instruction::LD(Operand::MemoryAddress(n16), Operand::Register(Register::A))
-      }
-      // LD A, [n16]
-      0xFA => {
-        let n16 = hardware.read_word(self.registers.pc);
-
-        Instruction::LD(Operand::Register(Register::A), Operand::MemoryAddress(n16))
-      }
-      // LDI [HL], A
-      0x22 => Instruction::LDI(
-        Operand::RegisterPairMemory(RegisterPair::HL),
-        Operand::Register(Register::A),
-      ),
-      // LDI A, [HL]
-      0x2A => Instruction::LDI(
-        Operand::Register(Register::A),
-        Operand::RegisterPairMemory(RegisterPair::HL),
-      ),
-      // LDD [HL], A
-      0x32 => Instruction::LDD(
-        Operand::RegisterPairMemory(RegisterPair::HL),
-        Operand::Register(Register::A),
-      ),
-      // LDD A, [HL]
-      0x3A => Instruction::LDD(
-        Operand::Register(Register::A),
-        Operand::RegisterPairMemory(RegisterPair::HL),
-      ),
-      // LDH [0xFF00 + n8], A
-      0xE0 => {
-        let n8 = hardware.read_byte(self.registers.pc);
-
-        Instruction::LDH(Operand::HighMemoryByte(n8), Operand::Register(Register::A))
-      }
-      // LDH A, [0xFF00 + n8]
-      0xF0 => {
-        let n8 = hardware.read_byte(self.registers.pc);
-
-        Instruction::LDH(Operand::Register(Register::A), Operand::HighMemoryByte(n8))
-      }
-      // LDH [0xFF00 + C], A
-      0xE2 => Instruction::LDH(
-        Operand::HighMemoryRegister(Register::C),
-        Operand::Register(Register::A),
-      ),
-      // LDH A, [0xFF00 + C]
-      0xF2 => Instruction::LDH(
-        Operand::Register(Register::A),
-        Operand::HighMemoryRegister(Register::C),
-      ),
-      // ADC A, r8 | [HL]
-      0x88..=0x8F => {
-        let src_reg = Register::from_bits(byte & 0x7).unwrap();
-
-        Instruction::ADC(Operand::Register(Register::A), Operand::Register(src_reg))
-      }
-      // ADC A, n8
-      0xCE => {
-        let n8 = hardware.read_byte(self.registers.pc);
-
-        Instruction::ADC(Operand::Register(Register::A), Operand::Byte(n8))
-      }
-      // ADD A, r8 | [HL]
-      0x80..=0x87 => {
-        let src_reg = Register::from_bits(byte & 0x7).unwrap();
-
-        Instruction::ADD(Operand::Register(Register::A), Operand::Register(src_reg))
-      }
-      // ADD A, n8
-      0xC6 => {
-        let n8 = hardware.read_byte(self.registers.pc);
-
-        Instruction::ADD(Operand::Register(Register::A), Operand::Byte(n8))
-      }
-      // ADD HL, r16
-      0x09 | 0x19 | 0x29 | 0x39 => {
-        let r16 = RegisterPair::from_bits((byte >> 4) & 0x3, false).unwrap();
-
-        Instruction::ADD(
-          Operand::RegisterPair(RegisterPair::HL),
-          Operand::RegisterPair(r16),
-        )
-      }
-      // ADD SP, n8
-      0xE8 => {
-        let n8 = hardware.read_byte(self.registers.pc);
-
-        Instruction::ADD(Operand::RegisterPair(RegisterPair::SP), Operand::Byte(n8))
-      }
-      // AND A, r8 | [HL]
-      0xA0..=0xA7 => {
-        let src_reg = Register::from_bits(byte & 0x7).unwrap();
-
-        Instruction::AND(Operand::Register(Register::A), Operand::Register(src_reg))
-      }
-      // AND A, n8
-      0xE6 => {
-        let n8 = hardware.read_byte(self.registers.pc);
-
-        Instruction::AND(Operand::Register(Register::A), Operand::Byte(n8))
-      }
-      // CP A, r8 | [HL]
-      0xB8..=0xBF => {
-        let src_reg = Register::from_bits(byte & 0x7).unwrap();
-
-        Instruction::CP(Operand::Register(Register::A), Operand::Register(src_reg))
-      }
-      // CP A, n8
-      0xFE => {
-        let n8 = hardware.read_byte(self.registers.pc);
-
-        Instruction::CP(Operand::Register(Register::A), Operand::Byte(n8))
-      }
-      // DEC r8
-      0x05 | 0x15 | 0x25 | 0x35 | 0x0D | 0x1D | 0x2D | 0x3D => {
-        let dst_reg = Register::from_bits((byte >> 3) & 0x7).unwrap();
-
-        Instruction::DEC(Operand::Register(dst_reg))
-      }
-      // DEC r16
-      0x0B | 0x1B | 0x2B | 0x3B => {
-        let r16 = RegisterPair::from_bits((byte >> 4) & 0x3, false).unwrap();
-
-        Instruction::DEC(Operand::RegisterPair(r16))
-      }
-      // INC r8
-      0x04 | 0x14 | 0x24 | 0x34 | 0x0C | 0x1C | 0x2C | 0x3C => {
-        let dst_reg = Register::from_bits((byte >> 3) & 0x7).unwrap();
-
-        Instruction::INC(Operand::Register(dst_reg))
-      }
-      // INC r16
-      0x03 | 0x13 | 0x23 | 0x33 => {
-        let r16 = RegisterPair::from_bits((byte >> 4) & 0x3, false).unwrap();
-
-        Instruction::INC(Operand::RegisterPair(r16))
-      }
-      // OR A, r8 | [HL]
-      0xB0..=0xB7 => {
-        let src_reg = Register::from_bits(byte & 0x7).unwrap();
-
-        Instruction::OR(Operand::Register(Register::A), Operand::Register(src_reg))
-      }
-      // OR A, n8
-      0xF6 => {
-        let n8 = hardware.read_byte(self.registers.pc);
-
-        Instruction::OR(Operand::Register(Register::A), Operand::Byte(n8))
-      }
-      // SBC A, r8 | [HL]
-      0x98..=0x9F => {
-        let src_reg = Register::from_bits(byte & 0x7).unwrap();
-
-        Instruction::SBC(Operand::Register(Register::A), Operand::Register(src_reg))
-      }
-      // SBC A, n8
-      0xDE => {
-        let n8 = hardware.read_byte(self.registers.pc);
-
-        Instruction::SBC(Operand::Register(Register::A), Operand::Byte(n8))
-      }
-      // SUB A, r8 | [HL]
-      0x90..=0x97 => {
-        let src_reg = Register::from_bits(byte & 0x7).unwrap();
-
-        Instruction::SUB(Operand::Register(Register::A), Operand::Register(src_reg))
-      }
-      // SUB A, n8
-      0xD6 => {
-        let n8 = hardware.read_byte(self.registers.pc);
-
-        Instruction::SUB(Operand::Register(Register::A), Operand::Byte(n8))
-      }
-      // XOR A, r8 | [HL]
-      0xA8..=0xAF => {
-        let src_reg = Register::from_bits(byte & 0x7).unwrap();
-
-        Instruction::XOR(Operand::Register(Register::A), Operand::Register(src_reg))
-      }
-      // XOR A, n8
-      0xEE => {
-        let n8 = hardware.read_byte(self.registers.pc);
-
-        Instruction::XOR(Operand::Register(Register::A), Operand::Byte(n8))
-      }
-      // DAA
-      0x27 => Instruction::DAA,
-
-      // CALL cf, n16
-      0xC4 | 0xD4 | 0xCC | 0xDC => {
-        let cond_flag = ConditionalFlag::from_bits((byte >> 3) & 0x3).unwrap();
-        let n16 = hardware.read_word(self.registers.pc);
-
-        Instruction::CALL(Some(Operand::Conditional(cond_flag)), Operand::Word(n16))
-      }
-      // CALL n16
-      0xCD => {
-        let n16 = hardware.read_word(self.registers.pc);
-
-        Instruction::CALL(None, Operand::Word(n16))
-      }
-      // JP cf, n16
-      0xC2 | 0xD2 | 0xCA | 0xDA => {
-        let cond_flag = ConditionalFlag::from_bits((byte >> 3) & 0x3).unwrap();
-        let n16 = hardware.read_word(self.registers.pc);
-
-        Instruction::JP(Some(Operand::Conditional(cond_flag)), Operand::Word(n16))
-      }
-      // JP n16
-      0xC3 => {
-        let n16 = hardware.read_word(self.registers.pc);
-
-        Instruction::JP(None, Operand::Word(n16))
-      }
-      // JP HL
-      0xE9 => Instruction::JP(None, Operand::RegisterPair(RegisterPair::HL)),
-      // JR cf, n8
-      0x20 | 0x30 | 0x28 | 0x38 => {
-        let cond_flag = ConditionalFlag::from_bits((byte >> 3) & 0x3).unwrap();
-        let n8 = hardware.read_byte(self.registers.pc);
-
-        Instruction::JR(Some(Operand::Conditional(cond_flag)), Operand::Byte(n8))
-      }
-      // JR n8
-      0x18 => {
-        let n8 = hardware.read_byte(self.registers.pc);
-
-        Instruction::JR(None, Operand::Byte(n8))
-      }
-      // RET cf
-      0xC0 | 0xD0 | 0xC8 | 0xD8 => {
-        let cond_flag = ConditionalFlag::from_bits((byte >> 3) & 0x3).unwrap();
-
-        Instruction::RET(Some(Operand::Conditional(cond_flag)))
-      }
-      // RET
-      0xC9 => Instruction::RET(None),
-      // RETI
-      0xD9 => Instruction::RETI,
-      // RST 0x0 | 0x10 | 0x20 | 0x30 | 0x08 | 0x18 | 0x28 | 0x38
-      0xC7 | 0xD7 | 0xE7 | 0xF7 | 0xCF | 0xDF | 0xEF | 0xFF => {
-        // The target is encoded in bits 3 through 5.
-        let target = byte & 0b11_1000;
-
-        Instruction::RST(Operand::Byte(target))
-      }
-      // STOP n8
-      0x10 => {
-        // NOTE: `STOP` needs to be followed by another byte.
-        let n8 = hardware.read_byte(self.registers.pc);
-
-        Instruction::STOP(Operand::Byte(n8))
-      }
-      // HALT
-      0x76 => Instruction::HALT,
-      // NOP
-      0x0 => Instruction::NOP,
-
-      // POP r16
-      0xC1 | 0xD1 | 0xE1 | 0xF1 => {
-        let r16 = RegisterPair::from_bits((byte >> 4) & 0x3, true).unwrap();
-
-        Instruction::POP(Operand::RegisterPair(r16))
-      }
-      // PUSH r16
-      0xC5 | 0xD5 | 0xE5 | 0xF5 => {
-        let r16 = RegisterPair::from_bits((byte >> 4) & 0x3, true).unwrap();
-
-        Instruction::PUSH(Operand::RegisterPair(r16))
-      }
-
-      // CCF
-      0x3F => Instruction::CCF,
-      // CPL
-      0x2F => Instruction::CPL,
-      // DI
-      0xF3 => Instruction::DI,
-      // EI
-      0xFB => Instruction::EI,
-      // SCF
-      0x37 => Instruction::SCF,
-
-      // RLA
-      0x17 => Instruction::RLA,
-      // RLCA
-      0x07 => Instruction::RLCA,
-      // RRA
-      0x1F => Instruction::RRA,
-      // RRCA
-      0x0F => Instruction::RRCA,
-
-      // Extended instruction set
-      0xCB => {
-        let next_byte = hardware.read_byte(self.registers.pc);
-
-        match next_byte {
-          // BIT 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7, r8 | [HL]
-          0x40..=0x7F => {
-            let bit_num = (next_byte >> 3) & 0x7;
-            let src_reg = Register::from_bits(next_byte & 0x7).unwrap();
-
-            Instruction::BIT(Operand::Byte(bit_num), Operand::Register(src_reg))
-          }
-          // RES 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7, r8 | [HL]
-          0x80..=0xBF => {
-            let bit_num = (next_byte >> 3) & 0x7;
-            let src_reg = Register::from_bits(next_byte & 0x7).unwrap();
-
-            Instruction::RES(Operand::Byte(bit_num), Operand::Register(src_reg))
-          }
-          // SET 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7, r8 | [HL]
-          0xC0..=0xFF => {
-            let bit_num = (next_byte >> 3) & 0x7;
-            let src_reg = Register::from_bits(next_byte & 0x7).unwrap();
-
-            Instruction::SET(Operand::Byte(bit_num), Operand::Register(src_reg))
-          }
-          // RL r8 | [HL]
-          0x10..=0x17 => {
-            let src_reg = Register::from_bits(next_byte & 0x7).unwrap();
-
-            Instruction::RL(Operand::Register(src_reg))
-          }
-          // RLC r8 | [HL]
-          0x00..=0x07 => {
-            let src_reg = Register::from_bits(next_byte & 0x7).unwrap();
-
-            Instruction::RLC(Operand::Register(src_reg))
-          }
-          // RR r8 | [HL]
-          0x18..=0x1F => {
-            let src_reg = Register::from_bits(next_byte & 0x7).unwrap();
-
-            Instruction::RR(Operand::Register(src_reg))
-          }
-          // RRC r8 | [HL]
-          0x08..=0x0F => {
-            let src_reg = Register::from_bits(next_byte & 0x7).unwrap();
-
-            Instruction::RRC(Operand::Register(src_reg))
-          }
-          // SLA r8 | [HL]
-          0x20..=0x27 => {
-            let src_reg = Register::from_bits(next_byte & 0x7).unwrap();
-
-            Instruction::SLA(Operand::Register(src_reg))
-          }
-          // SRA r8 | [HL]
-          0x28..=0x2F => {
-            let src_reg = Register::from_bits(next_byte & 0x7).unwrap();
-
-            Instruction::SRA(Operand::Register(src_reg))
-          }
-          // SRL r8 | [HL]
-          0x38..=0x3F => {
-            let src_reg = Register::from_bits(next_byte & 0x7).unwrap();
-
-            Instruction::SRL(Operand::Register(src_reg))
-          }
-          // SWAP r8 | [HL]
-          0x30..=0x37 => {
-            let src_reg = Register::from_bits(next_byte & 0x7).unwrap();
-
-            Instruction::SWAP(Operand::Register(src_reg))
-          }
-        }
-      }
-
-      // Unused opcodes
-      0xD3 | 0xE3 | 0xE4 | 0xF4 | 0xDB | 0xEB | 0xEC | 0xFC | 0xDD | 0xED | 0xFD => {
-        // NOTE: Is mapping to a `NOP` correct? Supposedly unknown opcodes hang the CPU?
-        Instruction::NOP
-      }
-    }
-  }
-
-  /// Handles any of the currently requested interrupts.
-  pub fn handle_interrupts(&mut self, hardware: &mut Hardware) {
-    // Interrupts with a smaller bit value have higher priority.
-    //
-    // The master interrupt is disabled before calling the handler of the interrupt.
-    //
-    // See https://gbdev.io/pandocs/Interrupts.html for more.
-    if hardware.is_interrupt_requested(Interrupt::VBlank) {
-      self.state = CpuState::Running;
-
-      if self.master_interrupt_enabled {
-        self.master_interrupt_enabled = false;
-
-        hardware.clear_interrupt(Interrupt::VBlank);
-
-        self.push_stack_word(hardware, self.registers.pc);
-
-        self.registers.pc = 0x40;
-      }
-    } else if hardware.is_interrupt_requested(Interrupt::Lcd) {
-      self.state = CpuState::Running;
-
-      if self.master_interrupt_enabled {
-        self.master_interrupt_enabled = false;
-
-        hardware.clear_interrupt(Interrupt::Lcd);
-
-        self.push_stack_word(hardware, self.registers.pc);
-
-        self.registers.pc = 0x48;
-      }
-    } else if hardware.is_interrupt_requested(Interrupt::Timer) {
-      self.state = CpuState::Running;
-
-      if self.master_interrupt_enabled {
-        self.master_interrupt_enabled = false;
-
-        hardware.clear_interrupt(Interrupt::Timer);
-
-        self.push_stack_word(hardware, self.registers.pc);
-
-        self.registers.pc = 0x50;
-      }
-    } else if hardware.is_interrupt_requested(Interrupt::Serial) {
-      self.state = CpuState::Running;
-
-      if self.master_interrupt_enabled {
-        self.master_interrupt_enabled = false;
-
-        hardware.clear_interrupt(Interrupt::Serial);
-
-        self.push_stack_word(hardware, self.registers.pc);
-
-        self.registers.pc = 0x58;
-      }
-    } else if hardware.is_interrupt_requested(Interrupt::Joypad) {
-      self.state = CpuState::Running;
-
-      if self.master_interrupt_enabled {
-        self.master_interrupt_enabled = false;
-
-        hardware.clear_interrupt(Interrupt::Joypad);
-
-        self.push_stack_word(hardware, self.registers.pc);
-
-        self.registers.pc = 0x60;
-      }
-    }
-  }
-
+  // TODO: Once we have a boot rom, we shouldn't need this function.
   /// Sets the default register values.
   pub fn set_register_defaults(&mut self) {
     // These values were taken from "The Cycle-Accurate Game Boy Docs"
@@ -1585,103 +119,2491 @@ impl Cpu {
     self.registers.pc = 0x100;
   }
 
-  /// The state of the CPU.
-  pub fn state(&self) -> CpuState {
-    self.state
+  /// Steps the CPU by 1 T-cycle.
+  pub fn step(&mut self, hardware: &mut Hardware) {
+    self.t_cycles = self.t_cycles.wrapping_add(1);
+
+    match self.t_cycles % 4 {
+      1 | 2 => {}
+      3 => {
+        // Perform an initial fetch to avoid the assumption that the first instruction
+        // at address 0x0100 will always be a `NOP`.
+        if !self.initial_fetch {
+          self.fetch_cycle(hardware);
+          self.initial_fetch = true;
+        }
+
+        // The check for interrupts supposedly occur during T3 from the end of the
+        // previous instruction's fetch, so lets transition into the appropriate
+        // state if we need to handle interrupts.
+        if self.should_handle_interrupts {
+          self.state = CpuState::HandlingInterrupts;
+        }
+      }
+      0 => {
+        // The `EI` instruction has a delay of 4 T-cycles.
+        if self.last_instruction == 0xFB {
+          self.interrupt_master_enabled = true;
+        }
+
+        match self.state {
+          CpuState::Running => self.step_instruction(hardware),
+          CpuState::HandlingInterrupts => self.handle_interrupts(hardware),
+          CpuState::Halted => {
+            // If the CPU is halted and we're in `CpuState::Halted` instead of
+            // `CpuState::HandlingInterrupts`, then that means that the IME is set
+            // to false. Since this is the case, exit out of the halted state since
+            // it's been 4 T-cycles since the CPU was halted, by now.
+            if hardware.has_pending_interrupts() {
+              self.state = CpuState::Running;
+            }
+          }
+          CpuState::Stopped => {}
+        }
+      }
+      _ => unreachable!(),
+    }
   }
 
-  /// Reads the value of the [`Register`].
-  fn read_register(&self, hardware: &Hardware, register: Register) -> u8 {
-    match register {
-      Register::A => self.registers.a,
-      Register::B => self.registers.b,
-      Register::C => self.registers.c,
-      Register::D => self.registers.d,
-      Register::E => self.registers.e,
-      Register::H => self.registers.h,
-      Register::L => self.registers.l,
-      Register::M => {
-        let address = ((self.registers.h as u16) << 8) | (self.registers.l as u16);
+  /// Steps an instruction by 1 M-cycle.
+  pub fn step_instruction(&mut self, hardware: &mut Hardware) {
+    use CpuCycle::*;
 
-        hardware.read_byte(address)
+    let opcode = self.registers.ir;
+
+    match (self.saw_prefix_opcode, opcode) {
+      // LD r8 | [HL], r8 | [HL]
+      (false, 0x40..0x76 | 0x77..=0x7F) => {
+        if matches!(self.cycle, M1) {
+          if is_src_register_memory!(opcode) || is_dest_register_memory!(opcode) {
+            self.cycle = M2;
+          } else {
+            perform_with_register!(
+              &self.registers,
+              extract_src_register!(opcode),
+              (reg_value) => write_to_register!(
+                &mut self.registers, extract_dest_register!(opcode), reg_value
+              )
+            );
+
+            self.fetch_cycle(hardware);
+          }
+        } else if matches!(self.cycle, M2) {
+          if is_src_register_memory!(opcode) {
+            let src_value = self.read_memory_register(hardware);
+
+            write_to_register!(
+              &mut self.registers,
+              extract_dest_register!(opcode),
+              src_value
+            );
+          } else {
+            // We're writing to register M here
+            perform_with_register!(
+              &self.registers,
+               extract_src_register!(opcode),
+              (reg_value) => self.write_memory_register(hardware, reg_value)
+            );
+          }
+
+          self.fetch_cycle(hardware);
+        }
+      }
+      // LD r16, imm16
+      (false, 0x01 | 0x11 | 0x21 | 0x31) => {
+        if matches!(self.cycle, M1) {
+          self.cycle = M2;
+        } else if matches!(self.cycle, M2) {
+          let lower = self.fetch_byte(hardware);
+          let rp = extract_register_pair!(opcode);
+
+          if rp == registers::REGISTER_PAIR_BC {
+            self.registers.c = lower;
+          } else if rp == registers::REGISTER_PAIR_DE {
+            self.registers.e = lower;
+          } else if rp == registers::REGISTER_PAIR_HL {
+            self.registers.l = lower;
+          } else if rp == registers::REGISTER_PAIR_SP {
+            self.registers.sp = (self.registers.sp & 0xFF00) | (lower as u16)
+          }
+
+          self.cycle = M3;
+        } else if matches!(self.cycle, M3) {
+          let upper = self.fetch_byte(hardware);
+          let rp = extract_register_pair!(opcode);
+
+          if rp == registers::REGISTER_PAIR_BC {
+            self.registers.b = upper;
+          } else if rp == registers::REGISTER_PAIR_DE {
+            self.registers.d = upper;
+          } else if rp == registers::REGISTER_PAIR_HL {
+            self.registers.h = upper;
+          } else if rp == registers::REGISTER_PAIR_SP {
+            self.registers.sp = (self.registers.sp & 0x00FF) | ((upper as u16) << 8);
+          }
+
+          self.fetch_cycle(hardware);
+        }
+      }
+      // LD [r16], A
+      (false, 0x02 | 0x12) => {
+        if matches!(self.cycle, M1) {
+          self.cycle = M2;
+        } else if matches!(self.cycle, M2) {
+          let rp = extract_register_pair!(opcode);
+
+          if rp == registers::REGISTER_PAIR_BC {
+            let address = ((self.registers.b as u16) << 8) | (self.registers.c as u16);
+
+            hardware.write_byte(address, self.registers.a);
+          } else if rp == registers::REGISTER_PAIR_DE {
+            let address = ((self.registers.d as u16) << 8) | (self.registers.e as u16);
+
+            hardware.write_byte(address, self.registers.a);
+          }
+
+          self.fetch_cycle(hardware);
+        }
+      }
+      // LD A, [r16]
+      (false, 0x0A | 0x1A) => {
+        if matches!(self.cycle, M1) {
+          self.cycle = M2;
+        } else if matches!(self.cycle, M2) {
+          let rp = extract_register_pair!(opcode);
+
+          if rp == registers::REGISTER_PAIR_BC {
+            let address = ((self.registers.b as u16) << 8) | (self.registers.c as u16);
+            let value = hardware.read_byte(address);
+
+            self.registers.a = value;
+          } else if rp == registers::REGISTER_PAIR_DE {
+            let address = ((self.registers.d as u16) << 8) | (self.registers.e as u16);
+            let value = hardware.read_byte(address);
+
+            self.registers.a = value;
+          }
+
+          self.fetch_cycle(hardware);
+        }
+      }
+      // LD [imm16], SP
+      (false, 0x08) => {
+        if matches!(self.cycle, M1) {
+          self.cycle = M2;
+        } else if matches!(self.cycle, M2) {
+          let lower = self.fetch_byte(hardware);
+
+          self.data_buffer[0] = lower;
+
+          self.cycle = M3;
+        } else if matches!(self.cycle, M3) {
+          let upper = self.fetch_byte(hardware);
+
+          self.data_buffer[1] = upper;
+
+          self.cycle = M4;
+        } else if matches!(self.cycle, M4) {
+          let address = ((self.data_buffer[1] as u16) << 8) | (self.data_buffer[0] as u16);
+          let lower_sp = (self.registers.sp & 0x00FF) as u8;
+
+          hardware.write_byte(address, lower_sp);
+
+          self.cycle = M5;
+        } else if matches!(self.cycle, M5) {
+          let address = ((self.data_buffer[1] as u16) << 8) | (self.data_buffer[0] as u16);
+          let upper_sp = (self.registers.sp >> 8) as u8;
+
+          hardware.write_byte(address.wrapping_add(1), upper_sp);
+
+          self.fetch_cycle(hardware);
+        }
+      }
+      // LD r8 | [HL], imm8
+      (false, 0x06 | 0x16 | 0x26 | 0x36 | 0x0E | 0x1E | 0x2E | 0x3E) => {
+        if matches!(self.cycle, M1) {
+          self.cycle = M2;
+        } else if matches!(self.cycle, M2) {
+          let imm8 = self.fetch_byte(hardware);
+
+          if is_dest_register_memory!(opcode) {
+            self.data_buffer[0] = imm8;
+
+            self.cycle = M3;
+          } else {
+            write_to_register!(&mut self.registers, extract_dest_register!(opcode), imm8);
+
+            self.fetch_cycle(hardware);
+          }
+        } else if matches!(self.cycle, M3) {
+          let imm8 = self.data_buffer[0];
+
+          self.write_memory_register(hardware, imm8);
+
+          self.fetch_cycle(hardware);
+        }
+      }
+      // LD HL, SP + imm8
+      (false, 0xF8) => {
+        if matches!(self.cycle, M1) {
+          self.cycle = M2;
+        } else if matches!(self.cycle, M2) {
+          let imm8 = self.fetch_byte(hardware);
+
+          self.data_buffer[0] = imm8;
+
+          self.cycle = M3;
+        } else if matches!(self.cycle, M3) {
+          // The offset can be negative, so do a sign-extend add.
+          let offset = self.data_buffer[0] as i8 as u16;
+          let sp = self.registers.sp;
+          let result = sp.wrapping_add(offset);
+
+          self.registers.h = (result >> 8) as u8;
+          self.registers.l = (result & 0x00FF) as u8;
+
+          self.toggle_flag(Flag::Z, false);
+          self.toggle_flag(Flag::N, false);
+          self.toggle_flag(Flag::H, (sp & 0x0F) as u8 + ((offset as u8) & 0x0F) > 0x0F);
+          self.toggle_flag(Flag::C, ((sp & 0xFF) + (offset & 0xFF)) > 0xFF);
+
+          self.fetch_cycle(hardware);
+        }
+      }
+      // LD SP, HL
+      (false, 0xF9) => {
+        if matches!(self.cycle, M1) {
+          self.cycle = M2;
+        } else if matches!(self.cycle, M2) {
+          self.registers.sp = ((self.registers.h as u16) << 8) | self.registers.l as u16;
+
+          self.fetch_cycle(hardware);
+        }
+      }
+      // LD [imm16], A
+      (false, 0xEA) => {
+        if matches!(self.cycle, M1) {
+          self.cycle = M2;
+        } else if matches!(self.cycle, M2) {
+          let lower = self.fetch_byte(hardware);
+
+          self.data_buffer[0] = lower;
+
+          self.cycle = M3;
+        } else if matches!(self.cycle, M3) {
+          let upper = self.fetch_byte(hardware);
+
+          self.data_buffer[1] = upper;
+
+          self.cycle = M4;
+        } else if matches!(self.cycle, M4) {
+          let address = ((self.data_buffer[1] as u16) << 8) | (self.data_buffer[0] as u16);
+
+          hardware.write_byte(address, self.registers.a);
+
+          self.fetch_cycle(hardware);
+        }
+      }
+      // LD A, [imm16]
+      (false, 0xFA) => {
+        if matches!(self.cycle, M1) {
+          self.cycle = M2;
+        } else if matches!(self.cycle, M2) {
+          let lower = self.fetch_byte(hardware);
+
+          self.data_buffer[0] = lower;
+
+          self.cycle = M3;
+        } else if matches!(self.cycle, M3) {
+          let upper = self.fetch_byte(hardware);
+
+          self.data_buffer[1] = upper;
+
+          self.cycle = M4;
+        } else if matches!(self.cycle, M4) {
+          let address = ((self.data_buffer[1] as u16) << 8) | (self.data_buffer[0] as u16);
+
+          self.registers.a = hardware.read_byte(address);
+
+          self.fetch_cycle(hardware);
+        }
+      }
+
+      // LDI [HL], A
+      (false, 0x22) => {
+        if matches!(self.cycle, M1) {
+          self.cycle = M2;
+        } else if matches!(self.cycle, M2) {
+          let hl_value = ((self.registers.h as u16) << 8) | self.registers.l as u16;
+
+          hardware.write_byte(hl_value, self.registers.a);
+
+          // Increment HL and write it back
+          let res = hl_value.wrapping_add(1);
+
+          self.registers.h = (res >> 8) as u8;
+          self.registers.l = (res & 0x00FF) as u8;
+
+          self.fetch_cycle(hardware);
+        }
+      }
+      // LDI A, [HL]
+      (false, 0x2A) => {
+        if matches!(self.cycle, M1) {
+          self.cycle = M2;
+        } else if matches!(self.cycle, M2) {
+          let hl_value = ((self.registers.h as u16) << 8) | self.registers.l as u16;
+
+          self.registers.a = hardware.read_byte(hl_value);
+
+          let res = hl_value.wrapping_add(1);
+
+          self.registers.h = (res >> 8) as u8;
+          self.registers.l = (res & 0x00FF) as u8;
+
+          self.fetch_cycle(hardware);
+        }
+      }
+      // LDD [HL], A
+      (false, 0x32) => {
+        if matches!(self.cycle, M1) {
+          self.cycle = M2;
+        } else if matches!(self.cycle, M2) {
+          let hl_value = ((self.registers.h as u16) << 8) | self.registers.l as u16;
+
+          hardware.write_byte(hl_value, self.registers.a);
+
+          let res = hl_value.wrapping_sub(1);
+
+          self.registers.h = (res >> 8) as u8;
+          self.registers.l = (res & 0x00FF) as u8;
+
+          self.fetch_cycle(hardware);
+        }
+      }
+      // LDD A, [HL]
+      (false, 0x3A) => {
+        if matches!(self.cycle, M1) {
+          self.cycle = M2;
+        } else if matches!(self.cycle, M2) {
+          let hl_value = ((self.registers.h as u16) << 8) | self.registers.l as u16;
+          let value = hardware.read_byte(hl_value);
+
+          self.registers.a = value;
+
+          let res = hl_value.wrapping_sub(1);
+
+          self.registers.h = (res >> 8) as u8;
+          self.registers.l = (res & 0x00FF) as u8;
+
+          self.fetch_cycle(hardware);
+        }
+      }
+      // LDH [0xFF00 + imm8], A
+      (false, 0xE0) => {
+        if matches!(self.cycle, M1) {
+          self.cycle = M2;
+        } else if matches!(self.cycle, M2) {
+          let imm8 = self.fetch_byte(hardware);
+
+          self.data_buffer[0] = imm8;
+
+          self.cycle = M3;
+        } else if matches!(self.cycle, M3) {
+          let imm8 = self.data_buffer[0];
+
+          hardware.write_byte(0xFF00 + imm8 as u16, self.registers.a);
+
+          self.fetch_cycle(hardware);
+        }
+      }
+      // LDH A, [0xFF00 + imm8]
+      (false, 0xF0) => {
+        if matches!(self.cycle, M1) {
+          self.cycle = M2;
+        } else if matches!(self.cycle, M2) {
+          let imm8 = self.fetch_byte(hardware);
+
+          self.data_buffer[0] = imm8;
+
+          self.cycle = M3;
+        } else if matches!(self.cycle, M3) {
+          let imm8 = self.data_buffer[0];
+
+          self.registers.a = hardware.read_byte(0xFF00 + imm8 as u16);
+
+          self.fetch_cycle(hardware);
+        }
+      }
+      // LDH [0xFF00 + C], A
+      (false, 0xE2) => {
+        if matches!(self.cycle, M1) {
+          self.cycle = M2;
+        } else if matches!(self.cycle, M2) {
+          hardware.write_byte(0xFF00 + self.registers.c as u16, self.registers.a);
+
+          self.fetch_cycle(hardware);
+        }
+      }
+      // LDH A, [0xFF00 + C]
+      (false, 0xF2) => {
+        if matches!(self.cycle, M1) {
+          self.cycle = M2;
+        } else if matches!(self.cycle, M2) {
+          self.registers.a = hardware.read_byte(0xFF00 + self.registers.c as u16);
+
+          self.fetch_cycle(hardware);
+        }
+      }
+
+      // ADC A, r | [HL]
+      (false, 0x88..=0x8F) => {
+        if matches!(self.cycle, M1) {
+          if is_src_register_memory!(opcode) {
+            self.cycle = M2;
+          } else {
+            let a_value = self.registers.a;
+            let is_carry_set = is_flag_set!(self.flags, Flag::C as u8);
+
+            perform_with_register!(
+              &self.registers,
+              extract_src_register!(opcode),
+              (reg_value) => {
+                let res = a_value
+                  .wrapping_add(reg_value)
+                  .wrapping_add(is_carry_set as u8);
+
+                self.registers.a = res;
+
+                self.toggle_flag(Flag::Z, res == 0);
+                self.toggle_flag(Flag::N, false);
+                self.toggle_flag(
+                  Flag::H,
+                  (a_value & 0x0F) + (reg_value & 0x0F) + (is_carry_set as u8 & 0x0F) > 0x0F,
+                );
+                self.toggle_flag(
+                  Flag::C,
+                  (a_value as u16 + reg_value as u16 + is_carry_set as u16) > 0xFF,
+                );
+              }
+            );
+
+            self.fetch_cycle(hardware);
+          }
+        } else if matches!(self.cycle, M2) {
+          let a_value = self.registers.a;
+          let is_carry_set = is_flag_set!(self.flags, Flag::C as u8);
+          let reg_value = self.read_memory_register(hardware);
+          let res = a_value
+            .wrapping_add(reg_value)
+            .wrapping_add(is_carry_set as u8);
+
+          self.registers.a = res;
+
+          self.toggle_flag(Flag::Z, res == 0);
+          self.toggle_flag(Flag::N, false);
+          self.toggle_flag(
+            Flag::H,
+            (a_value & 0x0F) + (reg_value & 0x0F) + (is_carry_set as u8 & 0x0F) > 0x0F,
+          );
+          self.toggle_flag(
+            Flag::C,
+            (a_value as u16 + reg_value as u16 + is_carry_set as u16) > 0xFF,
+          );
+
+          self.fetch_cycle(hardware);
+        }
+      }
+      // ADC A, imm8
+      (false, 0xCE) => {
+        if matches!(self.cycle, M1) {
+          self.cycle = M2;
+        } else if matches!(self.cycle, M2) {
+          let imm8 = self.fetch_byte(hardware);
+          let a_value = self.registers.a;
+          let is_carry_set = is_flag_set!(self.flags, Flag::C as u8);
+          let res = a_value.wrapping_add(imm8).wrapping_add(is_carry_set as u8);
+
+          self.registers.a = res;
+
+          self.toggle_flag(Flag::Z, res == 0);
+          self.toggle_flag(Flag::N, false);
+          self.toggle_flag(
+            Flag::H,
+            (a_value & 0x0F) + (imm8 & 0x0F) + (is_carry_set as u8 & 0x0F) > 0x0F,
+          );
+          self.toggle_flag(
+            Flag::C,
+            (a_value as u16 + imm8 as u16 + is_carry_set as u16) > 0xFF,
+          );
+
+          self.fetch_cycle(hardware);
+        }
+      }
+      // ADD A, r8 | [HL]
+      (false, 0x80..=0x87) => {
+        if matches!(self.cycle, M1) {
+          if is_src_register_memory!(opcode) {
+            self.cycle = M2;
+          } else {
+            perform_with_register!(
+              &self.registers,
+              extract_src_register!(opcode),
+              (reg_value) => {
+                let a_value = self.registers.a;
+                let res = a_value.wrapping_add(reg_value);
+
+                self.registers.a = res;
+
+                self.toggle_flag(Flag::Z, res == 0);
+                self.toggle_flag(Flag::N, false);
+                self.toggle_flag(Flag::H, (a_value & 0x0F) + (reg_value & 0x0F) > 0x0F);
+                self.toggle_flag(Flag::C, (a_value as u16 + reg_value as u16) > 0xFF);
+              }
+            );
+
+            self.fetch_cycle(hardware);
+          }
+        } else if matches!(self.cycle, M2) {
+          let a_value = self.registers.a;
+          let reg_value = self.read_memory_register(hardware);
+          let res = a_value.wrapping_add(reg_value);
+
+          self.registers.a = res;
+
+          self.toggle_flag(Flag::Z, res == 0);
+          self.toggle_flag(Flag::N, false);
+          self.toggle_flag(Flag::H, (a_value & 0x0F) + (reg_value & 0x0F) > 0x0F);
+          self.toggle_flag(Flag::C, (a_value as u16 + reg_value as u16) > 0xFF);
+
+          self.fetch_cycle(hardware);
+        }
+      }
+      // ADD A, imm8
+      (false, 0xC6) => {
+        if matches!(self.cycle, M1) {
+          self.cycle = M2;
+        } else if matches!(self.cycle, M2) {
+          let imm8 = self.fetch_byte(hardware);
+          let a_value = self.registers.a;
+          let res = a_value.wrapping_add(imm8);
+
+          self.registers.a = res;
+
+          self.toggle_flag(Flag::Z, res == 0);
+          self.toggle_flag(Flag::N, false);
+          self.toggle_flag(Flag::H, (a_value & 0x0F) + (imm8 & 0x0F) > 0x0F);
+          self.toggle_flag(Flag::C, (a_value as u16 + imm8 as u16) > 0xFF);
+
+          self.fetch_cycle(hardware);
+        }
+      }
+      // ADD HL, r16
+      (false, 0x09 | 0x19 | 0x29 | 0x39) => {
+        if matches!(self.cycle, M1) {
+          let l_value = self.registers.l;
+          let rp = extract_register_pair!(opcode);
+
+          if rp == registers::REGISTER_PAIR_BC {
+            let src_lower_byte = self.registers.c;
+            let result = l_value.wrapping_add(src_lower_byte);
+
+            self.registers.l = result;
+
+            self.toggle_flag(Flag::H, ((l_value & 0x0F) + (src_lower_byte & 0x0F)) > 0x0F);
+            self.toggle_flag(Flag::C, (l_value as u16 + src_lower_byte as u16) > 0xFF);
+          } else if rp == registers::REGISTER_PAIR_DE {
+            let src_lower_byte = self.registers.e;
+            let result = l_value.wrapping_add(src_lower_byte);
+
+            self.registers.l = result;
+
+            self.toggle_flag(Flag::H, ((l_value & 0x0F) + (src_lower_byte & 0x0F)) > 0x0F);
+            self.toggle_flag(Flag::C, (l_value as u16 + src_lower_byte as u16) > 0xFF);
+          } else if rp == registers::REGISTER_PAIR_HL {
+            let src_lower_byte = self.registers.l;
+            let result = l_value.wrapping_add(src_lower_byte);
+
+            self.registers.l = result;
+
+            self.toggle_flag(Flag::H, ((l_value & 0x0F) + (src_lower_byte & 0x0F)) > 0x0F);
+            self.toggle_flag(Flag::C, (l_value as u16 + src_lower_byte as u16) > 0xFF);
+          } else if rp == registers::REGISTER_PAIR_SP {
+            let src_lower_byte = (self.registers.sp & 0x00FF) as u8;
+            let result = l_value.wrapping_add(src_lower_byte);
+
+            self.registers.l = result;
+
+            self.toggle_flag(Flag::H, ((l_value & 0x0F) + (src_lower_byte & 0x0F)) > 0x0F);
+            self.toggle_flag(Flag::C, (l_value as u16 + src_lower_byte as u16) > 0xFF);
+          }
+
+          self.cycle = M2;
+        } else if matches!(self.cycle, M2) {
+          let rp = extract_register_pair!(opcode);
+          let h_value = self.registers.h;
+          let carry_value = is_flag_set!(self.flags, Flag::C as u8) as u8;
+
+          if rp == registers::REGISTER_PAIR_BC {
+            let src_upper_byte = self.registers.b;
+            let result = h_value
+              .wrapping_add(src_upper_byte)
+              .wrapping_add(carry_value);
+
+            self.registers.h = result;
+
+            self.toggle_flag(
+              Flag::H,
+              ((h_value & 0x0F) + (src_upper_byte & 0x0F) + carry_value) > 0x0F,
+            );
+            self.toggle_flag(
+              Flag::C,
+              (h_value as u16 + src_upper_byte as u16 + carry_value as u16) > 0xFF,
+            );
+          } else if rp == registers::REGISTER_PAIR_DE {
+            let src_upper_byte = self.registers.d;
+            let result = h_value
+              .wrapping_add(src_upper_byte)
+              .wrapping_add(carry_value);
+
+            self.registers.h = result;
+
+            self.toggle_flag(
+              Flag::H,
+              ((h_value & 0x0F) + (src_upper_byte & 0x0F) + carry_value) > 0x0F,
+            );
+            self.toggle_flag(
+              Flag::C,
+              (h_value as u16 + src_upper_byte as u16 + carry_value as u16) > 0xFF,
+            );
+          } else if rp == registers::REGISTER_PAIR_HL {
+            let src_upper_byte = self.registers.h;
+            let result = h_value
+              .wrapping_add(src_upper_byte)
+              .wrapping_add(carry_value);
+
+            self.registers.h = result;
+
+            self.toggle_flag(
+              Flag::H,
+              ((h_value & 0x0F) + (src_upper_byte & 0x0F) + carry_value) > 0x0F,
+            );
+            self.toggle_flag(
+              Flag::C,
+              (h_value as u16 + src_upper_byte as u16 + carry_value as u16) > 0xFF,
+            );
+          } else if rp == registers::REGISTER_PAIR_SP {
+            let src_upper_byte = (self.registers.sp >> 8) as u8;
+            let result = h_value
+              .wrapping_add(src_upper_byte)
+              .wrapping_add(carry_value);
+
+            self.registers.h = result;
+
+            self.toggle_flag(
+              Flag::H,
+              ((h_value & 0x0F) + (src_upper_byte & 0x0F) + carry_value) > 0x0F,
+            );
+            self.toggle_flag(
+              Flag::C,
+              (h_value as u16 + src_upper_byte as u16 + carry_value as u16) > 0xFF,
+            );
+          }
+
+          // The `N` flag is unconditionally set to false
+          self.toggle_flag(Flag::N, false);
+
+          self.fetch_cycle(hardware);
+        }
+      }
+      // ADD SP, imm8
+      (false, 0xE8) => {
+        if matches!(self.cycle, M1) {
+          self.cycle = M2;
+        } else if matches!(self.cycle, M2) {
+          let imm8 = self.fetch_byte(hardware);
+
+          self.data_buffer[0] = imm8;
+
+          self.cycle = M3;
+        } else if matches!(self.cycle, M3) {
+          let imm8 = self.data_buffer[0];
+          let sp_low = (self.registers.sp & 0x00FF) as u8;
+          let new_sp_low = sp_low.wrapping_add(imm8);
+
+          self.data_buffer[1] = new_sp_low;
+
+          self.toggle_flag(Flag::Z, false);
+          self.toggle_flag(Flag::N, false);
+          self.toggle_flag(Flag::H, (sp_low & 0x0F) + (imm8 & 0x0F) > 0x0F);
+          self.toggle_flag(Flag::C, (sp_low as u16) + (imm8 as u16) > 0xFF);
+
+          self.cycle = M4;
+        } else if matches!(self.cycle, M4) {
+          let imm8 = self.data_buffer[0];
+          let upper_sp = (self.registers.sp >> 8) as u8;
+          // Adjustment value if the MSB is set, thus negative since the imm8 is signed.
+          let adj = if is_flag_set!(imm8, 0x80) { 0xFF } else { 0 };
+          let carry = is_flag_set!(self.flags, Flag::C as u8) as u8;
+          let new_upper_sp = upper_sp.wrapping_add(adj).wrapping_add(carry);
+          let new_lower_sp = self.data_buffer[1];
+
+          self.registers.sp = ((new_upper_sp as u16) << 8) | (new_lower_sp as u16);
+
+          self.fetch_cycle(hardware);
+        }
+      }
+      // AND A, r8 | [HL]
+      (false, 0xA0..=0xA7) => {
+        if matches!(self.cycle, M1) {
+          if is_src_register_memory!(opcode) {
+            self.cycle = M2;
+          } else {
+            perform_with_register!(
+              &self.registers,
+              extract_src_register!(opcode),
+              (reg_value) => {
+                let res = self.registers.a & reg_value;
+
+                self.registers.a = res;
+
+                self.toggle_flag(Flag::Z, res == 0);
+                self.toggle_flag(Flag::N, false);
+                self.toggle_flag(Flag::H, true);
+                self.toggle_flag(Flag::C, false);
+              }
+            );
+
+            self.fetch_cycle(hardware);
+          }
+        } else if matches!(self.cycle, M2) {
+          let src_value = self.read_memory_register(hardware);
+          let res = self.registers.a & src_value;
+
+          self.registers.a = res;
+
+          self.toggle_flag(Flag::Z, res == 0);
+          self.toggle_flag(Flag::N, false);
+          self.toggle_flag(Flag::H, true);
+          self.toggle_flag(Flag::C, false);
+
+          self.fetch_cycle(hardware);
+        }
+      }
+      // AND A, imm8
+      (false, 0xE6) => {
+        if matches!(self.cycle, M1) {
+          self.cycle = M2;
+        } else if matches!(self.cycle, M2) {
+          let imm8 = self.fetch_byte(hardware);
+          let res = self.registers.a & imm8;
+
+          self.registers.a = res;
+
+          self.toggle_flag(Flag::Z, res == 0);
+          self.toggle_flag(Flag::N, false);
+          self.toggle_flag(Flag::H, true);
+          self.toggle_flag(Flag::C, false);
+
+          self.fetch_cycle(hardware);
+        }
+      }
+      // CP A, r8 | [HL]
+      (false, 0xB8..=0xBF) => {
+        if matches!(self.cycle, M1) {
+          if is_src_register_memory!(opcode) {
+            self.cycle = M2;
+          } else {
+            perform_with_register!(
+              &self.registers,
+              extract_src_register!(opcode),
+              (reg_value) => {
+                let res = self.registers.a.wrapping_sub(reg_value);
+
+                self.toggle_flag(Flag::Z, res == 0);
+                self.toggle_flag(Flag::N, true);
+                self.toggle_flag(Flag::H, (self.registers.a & 0x0F) < (reg_value& 0x0F));
+                self.toggle_flag(Flag::C, self.registers.a < reg_value);
+              }
+            );
+
+            self.fetch_cycle(hardware);
+          }
+        } else if matches!(self.cycle, M2) {
+          let src_value = self.read_memory_register(hardware);
+          let res = self.registers.a.wrapping_sub(src_value);
+
+          self.toggle_flag(Flag::Z, res == 0);
+          self.toggle_flag(Flag::N, true);
+          self.toggle_flag(Flag::H, (self.registers.a & 0x0F) < (src_value & 0x0F));
+          self.toggle_flag(Flag::C, self.registers.a < src_value);
+
+          self.fetch_cycle(hardware);
+        }
+      }
+      // CP A, imm8
+      (false, 0xFE) => {
+        if matches!(self.cycle, M1) {
+          self.cycle = M2;
+        } else if matches!(self.cycle, M2) {
+          let imm8 = self.fetch_byte(hardware);
+          let res = self.registers.a.wrapping_sub(imm8);
+
+          self.toggle_flag(Flag::Z, res == 0);
+          self.toggle_flag(Flag::N, true);
+          self.toggle_flag(Flag::H, (self.registers.a & 0x0F) < (imm8 & 0x0F));
+          self.toggle_flag(Flag::C, self.registers.a < imm8);
+
+          self.fetch_cycle(hardware);
+        }
+      }
+      // DEC r8 | [HL]
+      (false, 0x05 | 0x15 | 0x25 | 0x35 | 0x0D | 0x1D | 0x2D | 0x3D) => {
+        if matches!(self.cycle, M1) {
+          if is_dest_register_memory!(opcode) {
+            self.cycle = M2;
+          } else {
+            let dest_reg = extract_dest_register!(opcode);
+
+            perform_with_register!(
+              &self.registers,
+              dest_reg,
+              (reg_value) => {
+                let res = reg_value.wrapping_sub(1);
+
+                write_to_register!(&mut self.registers, dest_reg, res);
+
+                self.toggle_flag(Flag::Z, res == 0);
+                self.toggle_flag(Flag::N, true);
+                self.toggle_flag(Flag::H, (reg_value & 0x0F) < 1);
+              }
+            );
+
+            self.fetch_cycle(hardware);
+          }
+        } else if matches!(self.cycle, M2) {
+          let reg_value = self.read_memory_register(hardware);
+
+          self.data_buffer[0] = reg_value;
+
+          self.cycle = M3;
+        } else if matches!(self.cycle, M3) {
+          let reg_value = self.data_buffer[0];
+          let res = reg_value.wrapping_sub(1);
+
+          self.write_memory_register(hardware, res);
+
+          self.toggle_flag(Flag::Z, res == 0);
+          self.toggle_flag(Flag::N, true);
+          self.toggle_flag(Flag::H, (reg_value & 0x0F) < 1);
+
+          self.fetch_cycle(hardware);
+        }
+      }
+      // DEC r16
+      (false, 0x0B | 0x1B | 0x2B | 0x3B) => {
+        if matches!(self.cycle, M1) {
+          let rp = extract_register_pair!(opcode);
+
+          if rp == registers::REGISTER_PAIR_BC {
+            let value = ((self.registers.b as u16) << 8) | (self.registers.c as u16);
+            let res = value.wrapping_sub(1);
+
+            self.registers.b = (res >> 8) as u8;
+            self.registers.c = (res & 0x00FF) as u8;
+          } else if rp == registers::REGISTER_PAIR_DE {
+            let value = ((self.registers.d as u16) << 8) | (self.registers.e as u16);
+            let res = value.wrapping_sub(1);
+
+            self.registers.d = (res >> 8) as u8;
+            self.registers.e = (res & 0x00FF) as u8;
+          } else if rp == registers::REGISTER_PAIR_HL {
+            let value = ((self.registers.h as u16) << 8) | (self.registers.l as u16);
+            let res = value.wrapping_sub(1);
+
+            self.registers.h = (res >> 8) as u8;
+            self.registers.l = (res & 0x00FF) as u8;
+          } else if rp == registers::REGISTER_PAIR_SP {
+            self.registers.sp = self.registers.sp.wrapping_sub(1);
+          }
+
+          self.cycle = M2;
+        } else if matches!(self.cycle, M2) {
+          self.fetch_cycle(hardware);
+        }
+      }
+      // INC r8 | [HL]
+      (false, 0x04 | 0x14 | 0x24 | 0x34 | 0x0C | 0x1C | 0x2C | 0x3C) => {
+        if matches!(self.cycle, M1) {
+          if is_dest_register_memory!(opcode) {
+            self.cycle = M2;
+          } else {
+            let dest_reg = extract_dest_register!(opcode);
+
+            perform_with_register!(
+              &self.registers,
+              dest_reg,
+              (reg_value) => {
+                let res = reg_value.wrapping_add(1);
+
+                write_to_register!(&mut self.registers, dest_reg, res);
+
+                self.toggle_flag(Flag::Z, res == 0);
+                self.toggle_flag(Flag::N, false);
+                self.toggle_flag(Flag::H, (reg_value & 0x0F) == 0x0F);
+              }
+            );
+
+            self.fetch_cycle(hardware);
+          }
+        } else if matches!(self.cycle, M2) {
+          let value = self.read_memory_register(hardware);
+
+          self.data_buffer[0] = value;
+
+          self.cycle = M3;
+        } else if matches!(self.cycle, M3) {
+          let reg_value = self.data_buffer[0];
+          let res = reg_value.wrapping_add(1);
+
+          self.write_memory_register(hardware, res);
+
+          self.toggle_flag(Flag::Z, res == 0);
+          self.toggle_flag(Flag::N, false);
+          self.toggle_flag(Flag::H, (reg_value & 0x0F) == 0x0F);
+
+          self.fetch_cycle(hardware);
+        }
+      }
+      // INC r16
+      (false, 0x03 | 0x13 | 0x23 | 0x33) => {
+        if matches!(self.cycle, M1) {
+          let rp = extract_register_pair!(opcode);
+
+          if rp == registers::REGISTER_PAIR_BC {
+            let value = ((self.registers.b as u16) << 8) | (self.registers.c as u16);
+            let res = value.wrapping_add(1);
+
+            self.registers.b = (res >> 8) as u8;
+            self.registers.c = (res & 0x00FF) as u8;
+          } else if rp == registers::REGISTER_PAIR_DE {
+            let value = ((self.registers.d as u16) << 8) | (self.registers.e as u16);
+            let res = value.wrapping_add(1);
+
+            self.registers.d = (res >> 8) as u8;
+            self.registers.e = (res & 0x00FF) as u8;
+          } else if rp == registers::REGISTER_PAIR_HL {
+            let value = ((self.registers.h as u16) << 8) | (self.registers.l as u16);
+            let res = value.wrapping_add(1);
+
+            self.registers.h = (res >> 8) as u8;
+            self.registers.l = (res & 0x00FF) as u8;
+          } else if rp == registers::REGISTER_PAIR_SP {
+            self.registers.sp = self.registers.sp.wrapping_add(1);
+          }
+
+          self.cycle = M2;
+        } else if matches!(self.cycle, M2) {
+          self.fetch_cycle(hardware);
+        }
+      }
+      // OR A, r8 | [HL]
+      (false, 0xB0..=0xB7) => {
+        if matches!(self.cycle, M1) {
+          if is_src_register_memory!(opcode) {
+            self.cycle = M2;
+          } else {
+            perform_with_register!(
+              &self.registers,
+              extract_src_register!(opcode),
+              (reg_value) => {
+                let res = self.registers.a | reg_value;
+
+                self.registers.a = res;
+
+                self.toggle_flag(Flag::Z, res == 0);
+                self.toggle_flag(Flag::N, false);
+                self.toggle_flag(Flag::H, false);
+                self.toggle_flag(Flag::C, false);
+              }
+            );
+
+            self.fetch_cycle(hardware);
+          }
+        } else if matches!(self.cycle, M2) {
+          let reg_value = self.read_memory_register(hardware);
+          let res = self.registers.a | reg_value;
+
+          self.registers.a = res;
+
+          self.toggle_flag(Flag::Z, res == 0);
+          self.toggle_flag(Flag::N, false);
+          self.toggle_flag(Flag::H, false);
+          self.toggle_flag(Flag::C, false);
+
+          self.fetch_cycle(hardware);
+        }
+      }
+      // OR A, imm8
+      (false, 0xF6) => {
+        if matches!(self.cycle, M1) {
+          self.cycle = M2;
+        } else if matches!(self.cycle, M2) {
+          let imm8 = self.fetch_byte(hardware);
+          let res = self.registers.a | imm8;
+
+          self.registers.a = res;
+
+          self.toggle_flag(Flag::Z, res == 0);
+          self.toggle_flag(Flag::N, false);
+          self.toggle_flag(Flag::H, false);
+          self.toggle_flag(Flag::C, false);
+
+          self.fetch_cycle(hardware);
+        }
+      }
+      // SBC A, r8 | [HL]
+      (false, 0x98..=0x9F) => {
+        if matches!(self.cycle, M1) {
+          if is_src_register_memory!(opcode) {
+            self.cycle = M2;
+          } else {
+            perform_with_register!(
+              &self.registers,
+              extract_src_register!(opcode),
+              (reg_value) => {
+                let is_carry_set = is_flag_set!(self.flags, Flag::C as u8) as u8;
+                let a_value = self.registers.a;
+                let res = a_value.wrapping_sub(reg_value).wrapping_sub(is_carry_set);
+
+                self.registers.a = res;
+
+                self.toggle_flag(Flag::Z, res == 0);
+                self.toggle_flag(Flag::N, true);
+                self.toggle_flag(
+                  Flag::H,
+                  (a_value & 0x0F) < ((reg_value & 0x0F) + is_carry_set),
+                );
+                self.toggle_flag(
+                  Flag::C,
+                  (a_value as u16) < (reg_value as u16 + is_carry_set as u16),
+                );
+              }
+            );
+
+            self.fetch_cycle(hardware);
+          }
+        } else if matches!(self.cycle, M2) {
+          let a_value = self.registers.a;
+          let reg_value = self.read_memory_register(hardware);
+          let is_carry_set = is_flag_set!(self.flags, Flag::C as u8) as u8;
+          let res = a_value.wrapping_sub(reg_value).wrapping_sub(is_carry_set);
+
+          self.registers.a = res;
+
+          self.toggle_flag(Flag::Z, res == 0);
+          self.toggle_flag(Flag::N, true);
+          self.toggle_flag(
+            Flag::H,
+            (a_value & 0x0F) < ((reg_value & 0x0F) + is_carry_set),
+          );
+          self.toggle_flag(
+            Flag::C,
+            (a_value as u16) < (reg_value as u16 + is_carry_set as u16),
+          );
+
+          self.fetch_cycle(hardware);
+        }
+      }
+      // SBC A, imm8
+      (false, 0xDE) => {
+        if matches!(self.cycle, M1) {
+          self.cycle = M2;
+        } else if matches!(self.cycle, M2) {
+          let a_value = self.registers.a;
+          let imm8 = self.fetch_byte(hardware);
+          let is_carry_set = is_flag_set!(self.flags, Flag::C as u8) as u8;
+          let res = a_value.wrapping_sub(imm8).wrapping_sub(is_carry_set);
+
+          self.registers.a = res;
+
+          self.toggle_flag(Flag::Z, res == 0);
+          self.toggle_flag(Flag::N, true);
+          self.toggle_flag(Flag::H, (a_value & 0x0F) < ((imm8 & 0x0F) + is_carry_set));
+          self.toggle_flag(
+            Flag::C,
+            (a_value as u16) < (imm8 as u16 + is_carry_set as u16),
+          );
+
+          self.fetch_cycle(hardware);
+        }
+      }
+      // SUB A, r8 | [HL]
+      (false, 0x90..=0x97) => {
+        if matches!(self.cycle, M1) {
+          if is_src_register_memory!(opcode) {
+            self.cycle = M2;
+          } else {
+            perform_with_register!(
+              &self.registers,
+              extract_src_register!(opcode),
+              (reg_value) => {
+                let a_value = self.registers.a;
+                let res = a_value.wrapping_sub(reg_value);
+
+                self.registers.a = res;
+
+                self.toggle_flag(Flag::Z, res == 0);
+                self.toggle_flag(Flag::N, true);
+                self.toggle_flag(Flag::H, (a_value & 0x0F) < (reg_value & 0x0F));
+                self.toggle_flag(Flag::C, a_value < reg_value);
+              }
+            );
+
+            self.fetch_cycle(hardware);
+          }
+        } else if matches!(self.cycle, M2) {
+          let a_value = self.registers.a;
+          let reg_value = self.read_memory_register(hardware);
+          let res = a_value.wrapping_sub(reg_value);
+
+          self.registers.a = res;
+
+          self.toggle_flag(Flag::Z, res == 0);
+          self.toggle_flag(Flag::N, true);
+          self.toggle_flag(Flag::H, (a_value & 0x0F) < (reg_value & 0x0F));
+          self.toggle_flag(Flag::C, a_value < reg_value);
+
+          self.fetch_cycle(hardware);
+        }
+      }
+      // SUB A, imm8
+      (false, 0xD6) => {
+        if matches!(self.cycle, M1) {
+          self.cycle = M2;
+        } else if matches!(self.cycle, M2) {
+          let imm8 = self.fetch_byte(hardware);
+          let a_value = self.registers.a;
+          let res = a_value.wrapping_sub(imm8);
+
+          self.registers.a = res;
+
+          self.toggle_flag(Flag::Z, res == 0);
+          self.toggle_flag(Flag::N, true);
+          self.toggle_flag(Flag::H, (a_value & 0x0F) < (imm8 & 0x0F));
+          self.toggle_flag(Flag::C, a_value < imm8);
+
+          self.fetch_cycle(hardware);
+        }
+      }
+      // XOR A, r8 | [HL]
+      (false, 0xA8..=0xAF) => {
+        if matches!(self.cycle, M1) {
+          if is_src_register_memory!(opcode) {
+            self.cycle = M2;
+          } else {
+            perform_with_register!(
+              &self.registers,
+              extract_src_register!(opcode),
+              (reg_value) => {
+                let res = self.registers.a ^ reg_value;
+
+                self.registers.a = res;
+
+                self.toggle_flag(Flag::Z, res == 0);
+                self.toggle_flag(Flag::N, false);
+                self.toggle_flag(Flag::H, false);
+                self.toggle_flag(Flag::C, false);
+              }
+            );
+
+            self.fetch_cycle(hardware);
+          }
+        } else if matches!(self.cycle, M2) {
+          let reg_value = self.read_memory_register(hardware);
+          let res = self.registers.a ^ reg_value;
+
+          self.registers.a = res;
+
+          self.toggle_flag(Flag::Z, res == 0);
+          self.toggle_flag(Flag::N, false);
+          self.toggle_flag(Flag::H, false);
+          self.toggle_flag(Flag::C, false);
+
+          self.fetch_cycle(hardware);
+        }
+      }
+      // XOR A, imm8
+      (false, 0xEE) => {
+        if matches!(self.cycle, M1) {
+          self.cycle = M2;
+        } else if matches!(self.cycle, M2) {
+          let imm8 = self.fetch_byte(hardware);
+          let res = self.registers.a ^ imm8;
+
+          self.registers.a = res;
+
+          self.toggle_flag(Flag::Z, res == 0);
+          self.toggle_flag(Flag::N, false);
+          self.toggle_flag(Flag::H, false);
+          self.toggle_flag(Flag::C, false);
+
+          self.fetch_cycle(hardware);
+        }
+      }
+      // DAA
+      (false, 0x27) => {
+        if matches!(self.cycle, M1) {
+          let mut correction = 0;
+
+          let subtracted = is_flag_set!(self.flags, Flag::N as u8);
+          let half_carried = is_flag_set!(self.flags, Flag::H as u8);
+          let mut carried = is_flag_set!(self.flags, Flag::C as u8);
+
+          // Check the lower nibble
+          if half_carried || (!subtracted && (self.registers.a & 0x0F) > 0x09) {
+            correction |= 0x06;
+          }
+
+          // Check the upper nibble
+          if carried || (!subtracted && self.registers.a > 0x99) {
+            correction |= 0x60;
+            carried = true;
+          }
+
+          let res = if subtracted {
+            self.registers.a.wrapping_sub(correction)
+          } else {
+            self.registers.a.wrapping_add(correction)
+          };
+
+          self.registers.a = res;
+
+          self.toggle_flag(Flag::Z, res == 0);
+          self.toggle_flag(Flag::H, false);
+          self.toggle_flag(Flag::C, carried);
+
+          self.fetch_cycle(hardware);
+        }
+      }
+
+      // CALL cc, imm16
+      (false, 0xC4 | 0xD4 | 0xCC | 0xDC) => {
+        if matches!(self.cycle, M1) {
+          self.cycle = M2;
+        } else if matches!(self.cycle, M2) {
+          let lower = self.fetch_byte(hardware);
+
+          self.data_buffer[0] = lower;
+
+          self.cycle = M3;
+        } else if matches!(self.cycle, M3) {
+          let upper = self.fetch_byte(hardware);
+
+          self.data_buffer[1] = upper;
+
+          let cc = get_conditional_flag!(opcode);
+
+          if self.is_conditional_flag_set(cc) {
+            self.cycle = M4;
+          } else {
+            self.fetch_cycle(hardware);
+          }
+        } else if matches!(self.cycle, M4) {
+          self.registers.sp = self.registers.sp.wrapping_sub(1);
+
+          self.cycle = M5;
+        } else if matches!(self.cycle, M5) {
+          let upper_pc = (self.registers.pc >> 8) as u8;
+
+          hardware.write_byte(self.registers.sp, upper_pc);
+
+          self.registers.sp = self.registers.sp.wrapping_sub(1);
+
+          self.cycle = M6;
+        } else if matches!(self.cycle, M6) {
+          let lower_pc = (self.registers.pc & 0x00FF) as u8;
+
+          hardware.write_byte(self.registers.sp, lower_pc);
+
+          let address = ((self.data_buffer[1] as u16) << 8) | (self.data_buffer[0] as u16);
+
+          self.registers.pc = address;
+
+          self.fetch_cycle(hardware);
+        }
+      }
+      // CALL imm16
+      (false, 0xCD) => {
+        if matches!(self.cycle, M1) {
+          self.cycle = M2;
+        } else if matches!(self.cycle, M2) {
+          let lower = self.fetch_byte(hardware);
+
+          self.data_buffer[0] = lower;
+
+          self.cycle = M3;
+        } else if matches!(self.cycle, M3) {
+          let upper = self.fetch_byte(hardware);
+
+          self.data_buffer[1] = upper;
+
+          self.cycle = M4;
+        } else if matches!(self.cycle, M4) {
+          self.registers.sp = self.registers.sp.wrapping_sub(1);
+
+          self.cycle = M5;
+        } else if matches!(self.cycle, M5) {
+          let upper_pc = (self.registers.pc >> 8) as u8;
+
+          hardware.write_byte(self.registers.sp, upper_pc);
+
+          self.registers.sp = self.registers.sp.wrapping_sub(1);
+
+          self.cycle = M6;
+        } else if matches!(self.cycle, M6) {
+          let lower_pc = (self.registers.pc & 0x00FF) as u8;
+
+          hardware.write_byte(self.registers.sp, lower_pc);
+
+          let address = ((self.data_buffer[1] as u16) << 8) | (self.data_buffer[0] as u16);
+
+          self.registers.pc = address;
+
+          self.fetch_cycle(hardware);
+        }
+      }
+      // JP cc, imm16
+      (false, 0xC2 | 0xD2 | 0xCA | 0xDA) => {
+        if matches!(self.cycle, M1) {
+          self.cycle = M2;
+        } else if matches!(self.cycle, M2) {
+          let lower = self.fetch_byte(hardware);
+
+          self.data_buffer[0] = lower;
+
+          self.cycle = M3;
+        } else if matches!(self.cycle, M3) {
+          let upper = self.fetch_byte(hardware);
+
+          self.data_buffer[1] = upper;
+
+          let cc = get_conditional_flag!(opcode);
+
+          if self.is_conditional_flag_set(cc) {
+            self.cycle = M4;
+          } else {
+            self.fetch_cycle(hardware);
+          }
+        } else if matches!(self.cycle, M4) {
+          let address = ((self.data_buffer[1] as u16) << 8) | (self.data_buffer[0] as u16);
+
+          self.registers.pc = address;
+
+          self.fetch_cycle(hardware);
+        }
+      }
+      // JP imm16
+      (false, 0xC3) => {
+        if matches!(self.cycle, M1) {
+          self.cycle = M2;
+        } else if matches!(self.cycle, M2) {
+          let lower = self.fetch_byte(hardware);
+
+          self.data_buffer[0] = lower;
+
+          self.cycle = M3;
+        } else if matches!(self.cycle, M3) {
+          let upper = self.fetch_byte(hardware);
+
+          self.data_buffer[1] = upper;
+
+          self.cycle = M4;
+        } else if matches!(self.cycle, M4) {
+          let address = ((self.data_buffer[1] as u16) << 8) | (self.data_buffer[0] as u16);
+
+          self.registers.pc = address;
+
+          self.fetch_cycle(hardware);
+        }
+      }
+      // JP HL
+      (false, 0xE9) => {
+        if matches!(self.cycle, M1) {
+          let address = ((self.registers.h as u16) << 8) | self.registers.l as u16;
+
+          self.registers.pc = address;
+
+          self.fetch_cycle(hardware);
+        }
+      }
+      // JR cc, imm8
+      (false, 0x20 | 0x30 | 0x28 | 0x38) => {
+        if matches!(self.cycle, M1) {
+          self.cycle = M2;
+        } else if matches!(self.cycle, M2) {
+          let imm8 = self.fetch_byte(hardware);
+
+          self.data_buffer[0] = imm8;
+
+          let cc = get_conditional_flag!(opcode);
+
+          if self.is_conditional_flag_set(cc) {
+            self.cycle = M3;
+          } else {
+            self.fetch_cycle(hardware);
+          }
+        } else if matches!(self.cycle, M3) {
+          // The offset can be negative, so sign-extend the value
+          let offset = self.data_buffer[0] as i8 as u16;
+
+          self.registers.pc = self.registers.pc.wrapping_add(offset);
+
+          self.fetch_cycle(hardware);
+        }
+      }
+      // JR imm8
+      (false, 0x18) => {
+        if matches!(self.cycle, M1) {
+          self.cycle = M2;
+        } else if matches!(self.cycle, M2) {
+          let imm8 = self.fetch_byte(hardware);
+
+          self.data_buffer[0] = imm8;
+
+          self.cycle = M3;
+        } else if matches!(self.cycle, M3) {
+          // The offset can be negative, so sign-extend the value
+          let offset = self.data_buffer[0] as i8 as u16;
+
+          self.registers.pc = self.registers.pc.wrapping_add(offset);
+
+          self.fetch_cycle(hardware);
+        }
+      }
+      // RET cc
+      (false, 0xC0 | 0xD0 | 0xC8 | 0xD8) => {
+        if matches!(self.cycle, M1) {
+          self.cycle = M2;
+        } else if matches!(self.cycle, M2) {
+          let cc = get_conditional_flag!(opcode);
+
+          if self.is_conditional_flag_set(cc) {
+            self.cycle = M3;
+          } else {
+            self.fetch_cycle(hardware);
+          }
+        } else if matches!(self.cycle, M3) {
+          let lower_pc = hardware.read_byte(self.registers.sp);
+
+          self.data_buffer[0] = lower_pc;
+          self.registers.sp = self.registers.sp.wrapping_add(1);
+
+          self.cycle = M4;
+        } else if matches!(self.cycle, M4) {
+          let upper_pc = hardware.read_byte(self.registers.sp);
+
+          self.data_buffer[1] = upper_pc;
+          self.registers.sp = self.registers.sp.wrapping_add(1);
+
+          self.cycle = M5;
+        } else if matches!(self.cycle, M5) {
+          let upper_pc = self.data_buffer[1];
+          let lower_pc = self.data_buffer[0];
+
+          self.registers.pc = ((upper_pc as u16) << 8) | (lower_pc as u16);
+
+          self.fetch_cycle(hardware);
+        }
+      }
+      // RET
+      (false, 0xC9) => {
+        if matches!(self.cycle, M1) {
+          self.cycle = M2;
+        } else if matches!(self.cycle, M2) {
+          let lower_pc = hardware.read_byte(self.registers.sp);
+
+          self.data_buffer[0] = lower_pc;
+          self.registers.sp = self.registers.sp.wrapping_add(1);
+
+          self.cycle = M3;
+        } else if matches!(self.cycle, M3) {
+          let upper_pc = hardware.read_byte(self.registers.sp);
+
+          self.data_buffer[1] = upper_pc;
+          self.registers.sp = self.registers.sp.wrapping_add(1);
+
+          self.cycle = M4;
+        } else if matches!(self.cycle, M4) {
+          let upper_pc = self.data_buffer[1];
+          let lower_pc = self.data_buffer[0];
+
+          self.registers.pc = ((upper_pc as u16) << 8) | (lower_pc as u16);
+
+          self.fetch_cycle(hardware);
+        }
+      }
+      // RETI
+      (false, 0xD9) => {
+        if matches!(self.cycle, M1) {
+          self.cycle = M2;
+        } else if matches!(self.cycle, M2) {
+          let lower_pc = hardware.read_byte(self.registers.sp);
+
+          self.data_buffer[0] = lower_pc;
+          self.registers.sp = self.registers.sp.wrapping_add(1);
+
+          self.cycle = M3;
+        } else if matches!(self.cycle, M3) {
+          let upper_pc = hardware.read_byte(self.registers.sp);
+
+          self.data_buffer[1] = upper_pc;
+          self.registers.sp = self.registers.sp.wrapping_add(1);
+
+          self.cycle = M4;
+        } else if matches!(self.cycle, M4) {
+          let upper_pc = self.data_buffer[1];
+          let lower_pc = self.data_buffer[0];
+
+          self.registers.pc = ((upper_pc as u16) << 8) | (lower_pc as u16);
+
+          self.interrupt_master_enabled = true;
+
+          self.fetch_cycle(hardware);
+        }
+      }
+      // RST vector
+      (false, 0xC7 | 0xD7 | 0xE7 | 0xF7 | 0xCF | 0xDF | 0xEF | 0xFF) => {
+        if matches!(self.cycle, M1) {
+          self.cycle = M2;
+        } else if matches!(self.cycle, M2) {
+          self.registers.sp = self.registers.sp.wrapping_sub(1);
+
+          self.cycle = M3;
+        } else if matches!(self.cycle, M3) {
+          let upper_pc = (self.registers.pc >> 8) as u8;
+
+          hardware.write_byte(self.registers.sp, upper_pc);
+
+          self.registers.sp = self.registers.sp.wrapping_sub(1);
+
+          self.cycle = M4;
+        } else if matches!(self.cycle, M4) {
+          let lower_pc = (self.registers.pc & 0x00FF) as u8;
+
+          hardware.write_byte(self.registers.sp, lower_pc);
+
+          // The target is encoded in bits 3 through 5.
+          let address = opcode & 0b0011_1000;
+
+          self.registers.pc = address as u16;
+
+          self.fetch_cycle(hardware);
+        }
+      }
+      // STOP
+      (false, 0x10) => {
+        if matches!(self.cycle, M1) {
+          // NOTE: `STOP` needs to be followed by another byte
+          self.fetch_byte(hardware);
+
+          self.state = CpuState::Stopped;
+
+          self.fetch_cycle(hardware);
+        }
+      }
+      // HALT
+      (false, 0x76) => {
+        if matches!(self.cycle, M1) {
+          // The Gameboy has a hardware bug when executing the `HALT` instruction.
+          //
+          // That is, when the master interrupt flag isn't enabled and the program
+          // tries to halt while there is an interrupt pending, it will fail to
+          // halt and enter a bugged state.
+          //
+          // In this bugged state, the program counter is NOT incremented after
+          // fetching the next byte.
+          //
+          // See https://gbdev.io/pandocs/halt.html for more.
+          if !self.interrupt_master_enabled && hardware.has_pending_interrupts() {
+            self.halt_bug = true;
+            // The CPU doesn't actually enter a halted state in the case of a bugged
+            // halt instruction.
+            self.state = CpuState::Running;
+          } else {
+            self.state = CpuState::Halted;
+          }
+
+          self.fetch_cycle(hardware);
+        }
+      }
+      // NOP
+      (false, 0x00) => {
+        if matches!(self.cycle, M1) {
+          self.fetch_cycle(hardware);
+        }
+      }
+
+      // POP r16
+      (false, 0xC1 | 0xD1 | 0xE1 | 0xF1) => {
+        if matches!(self.cycle, M1) {
+          self.cycle = M2;
+        } else if matches!(self.cycle, M2) {
+          let lower_byte = hardware.read_byte(self.registers.sp);
+
+          self.registers.sp = self.registers.sp.wrapping_add(1);
+
+          self.data_buffer[0] = lower_byte;
+
+          self.cycle = M3;
+        } else if matches!(self.cycle, M3) {
+          let upper_byte = hardware.read_byte(self.registers.sp);
+
+          self.registers.sp = self.registers.sp.wrapping_add(1);
+
+          let lower_byte = self.data_buffer[0];
+          let rp = extract_register_pair!(opcode);
+
+          if rp == registers::REGISTER_PAIR_BC {
+            self.registers.b = upper_byte;
+            self.registers.c = lower_byte;
+          } else if rp == registers::REGISTER_PAIR_DE {
+            self.registers.d = upper_byte;
+            self.registers.e = lower_byte;
+          } else if rp == registers::REGISTER_PAIR_HL {
+            self.registers.h = upper_byte;
+            self.registers.l = lower_byte;
+          } else if rp == registers::REGISTER_PAIR_AF {
+            self.registers.a = upper_byte;
+            self.flags = lower_byte & 0xF0;
+          }
+
+          self.fetch_cycle(hardware);
+        }
+      }
+      // PUSH r16
+      (false, 0xC5 | 0xD5 | 0xE5 | 0xF5) => {
+        if matches!(self.cycle, M1) {
+          self.cycle = M2;
+        } else if matches!(self.cycle, M2) {
+          self.registers.sp = self.registers.sp.wrapping_sub(1);
+
+          self.cycle = M3;
+        } else if matches!(self.cycle, M3) {
+          let rp = extract_register_pair!(opcode);
+
+          if rp == registers::REGISTER_PAIR_BC {
+            hardware.write_byte(self.registers.sp, self.registers.b);
+          } else if rp == registers::REGISTER_PAIR_DE {
+            hardware.write_byte(self.registers.sp, self.registers.d);
+          } else if rp == registers::REGISTER_PAIR_HL {
+            hardware.write_byte(self.registers.sp, self.registers.h);
+          } else if rp == registers::REGISTER_PAIR_AF {
+            hardware.write_byte(self.registers.sp, self.registers.a);
+          }
+
+          self.registers.sp = self.registers.sp.wrapping_sub(1);
+
+          self.cycle = M4;
+        } else if matches!(self.cycle, M4) {
+          let rp = extract_register_pair!(opcode);
+
+          if rp == registers::REGISTER_PAIR_BC {
+            hardware.write_byte(self.registers.sp, self.registers.c);
+          } else if rp == registers::REGISTER_PAIR_DE {
+            hardware.write_byte(self.registers.sp, self.registers.e);
+          } else if rp == registers::REGISTER_PAIR_HL {
+            hardware.write_byte(self.registers.sp, self.registers.l);
+          } else if rp == registers::REGISTER_PAIR_AF {
+            hardware.write_byte(self.registers.sp, self.flags);
+          }
+
+          self.fetch_cycle(hardware);
+        }
+      }
+      // CCF
+      (false, 0x3F) => {
+        if matches!(self.cycle, M1) {
+          self.toggle_flag(Flag::N, false);
+          self.toggle_flag(Flag::H, false);
+          self.toggle_flag(Flag::C, !is_flag_set!(self.flags, Flag::C as u8));
+
+          self.fetch_cycle(hardware);
+        }
+      }
+      // CPL
+      (false, 0x2F) => {
+        if matches!(self.cycle, M1) {
+          self.registers.a = !self.registers.a;
+
+          self.toggle_flag(Flag::N, true);
+          self.toggle_flag(Flag::H, true);
+
+          self.fetch_cycle(hardware);
+        }
+      }
+      // DI
+      (false, 0xF3) => {
+        if matches!(self.cycle, M1) {
+          self.interrupt_master_enabled = false;
+
+          // Use `complete_cycle` instead of `fetch_cycle` since the IME is disabled,
+          // thus no interrupts can occur.
+          self.complete_cycle(hardware);
+        }
+      }
+      // EI
+      (false, 0xFB) => {
+        if matches!(self.cycle, M1) {
+          // We shouldn't actually update the master interrupt flag immediately
+          // because this instruction seems to have a delay of 4 T-cycles
+          self.fetch_cycle(hardware);
+        }
+      }
+      // SCF
+      (false, 0x37) => {
+        if matches!(self.cycle, M1) {
+          self.toggle_flag(Flag::N, false);
+          self.toggle_flag(Flag::H, false);
+          self.toggle_flag(Flag::C, true);
+
+          self.fetch_cycle(hardware);
+        }
+      }
+
+      // RLA
+      (false, 0x17) => {
+        if matches!(self.cycle, M1) {
+          let is_carry_set = is_flag_set!(self.flags, Flag::C as u8);
+          let a_value = self.registers.a;
+          let res = (a_value << 1) | (is_carry_set as u8);
+
+          self.registers.a = res;
+
+          self.toggle_flag(Flag::Z, false);
+          self.toggle_flag(Flag::N, false);
+          self.toggle_flag(Flag::H, false);
+          self.toggle_flag(Flag::C, (a_value >> 7) == 0x1);
+
+          self.fetch_cycle(hardware);
+        }
+      }
+      // RLCA
+      (false, 0x07) => {
+        if matches!(self.cycle, M1) {
+          let a_value = self.registers.a;
+          let res = a_value.rotate_left(1);
+
+          self.registers.a = res;
+
+          self.toggle_flag(Flag::Z, false);
+          self.toggle_flag(Flag::N, false);
+          self.toggle_flag(Flag::H, false);
+          self.toggle_flag(Flag::C, (a_value >> 7) == 0x1);
+
+          self.fetch_cycle(hardware);
+        }
+      }
+      // RRA
+      (false, 0x1F) => {
+        if matches!(self.cycle, M1) {
+          let is_carry_set = is_flag_set!(self.flags, Flag::C as u8);
+          let a_value = self.registers.a;
+          let res = (a_value >> 1) | ((is_carry_set as u8) << 7);
+
+          self.registers.a = res;
+
+          self.toggle_flag(Flag::Z, false);
+          self.toggle_flag(Flag::N, false);
+          self.toggle_flag(Flag::H, false);
+          self.toggle_flag(Flag::C, (a_value & 0x1) == 1);
+
+          self.fetch_cycle(hardware);
+        }
+      }
+      // RRCA
+      (false, 0x0F) => {
+        if matches!(self.cycle, M1) {
+          let a_value = self.registers.a;
+          let res = a_value.rotate_right(1);
+
+          self.registers.a = res;
+
+          self.toggle_flag(Flag::Z, false);
+          self.toggle_flag(Flag::N, false);
+          self.toggle_flag(Flag::H, false);
+          self.toggle_flag(Flag::C, (a_value & 0x1) == 1);
+
+          self.fetch_cycle(hardware);
+        }
+      }
+
+      // Unused opcodes
+      (false, 0xD3 | 0xE3 | 0xE4 | 0xF4 | 0xDB | 0xEB | 0xEC | 0xFC | 0xDD | 0xED | 0xFD) => {
+        // Unused opcodes are actually supposed to hang the CPU, but it may be a sign
+        // that there's a bug some where, so lets panic in debug builds!
+        debug_assert!(
+          false,
+          "{:04X}: got invalid opcode {:02X}",
+          self.registers.pc, opcode
+        );
+      }
+
+      // PREFIX
+      (false, 0xCB) => {
+        self.saw_prefix_opcode = true;
+
+        // Use `complete_cycle` instead of `fetch_cycle` since interrupts cannot
+        // occur in-between this prefix byte and the next instruction.
+        self.complete_cycle(hardware);
+      }
+
+      // Extended Instruction Set
+
+      // BIT 0..8, r8 | [HL}]
+      (true, 0x40..=0x7F) => {
+        if matches!(self.cycle, M1) {
+          if is_src_register_memory!(opcode) {
+            self.cycle = M2;
+          } else {
+            let bit = (opcode >> 3) & 0x07;
+
+            perform_with_register!(
+              &self.registers,
+              extract_src_register!(opcode),
+              (reg_value) => {
+                let extracted_bit = (reg_value >> bit) & 1;
+
+                self.toggle_flag(Flag::Z, extracted_bit == 0);
+                self.toggle_flag(Flag::N, false);
+                self.toggle_flag(Flag::H, true);
+              }
+            );
+
+            self.saw_prefix_opcode = false;
+            self.fetch_cycle(hardware);
+          }
+        } else if matches!(self.cycle, M2) {
+          let bit = (opcode >> 3) & 0x07;
+          let reg_value = self.read_memory_register(hardware);
+          let extracted_bit = (reg_value >> bit) & 1;
+
+          self.toggle_flag(Flag::Z, extracted_bit == 0);
+          self.toggle_flag(Flag::N, false);
+          self.toggle_flag(Flag::H, true);
+
+          self.saw_prefix_opcode = false;
+          self.fetch_cycle(hardware);
+        }
+      }
+      // RES 0..8, r8 | [HL]
+      (true, 0x80..=0xBF) => {
+        if matches!(self.cycle, M1) {
+          if is_src_register_memory!(opcode) {
+            self.cycle = M2;
+          } else {
+            let src_reg = extract_src_register!(opcode);
+            let bit = (opcode >> 3) & 0x07;
+
+            perform_with_register!(
+              &self.registers,
+              src_reg,
+              (reg_value) => {
+                 let new_value = reg_value & !(1 << bit);
+
+                 write_to_register!(&mut self.registers, src_reg, new_value);
+              }
+            );
+
+            self.saw_prefix_opcode = false;
+            self.fetch_cycle(hardware);
+          }
+        } else if matches!(self.cycle, M2) {
+          let bit = (opcode >> 3) & 0x07;
+          let reg_value = self.read_memory_register(hardware);
+          let new_value = reg_value & !(1 << bit);
+
+          self.data_buffer[0] = new_value;
+
+          self.cycle = M3;
+        } else if matches!(self.cycle, M3) {
+          let new_value = self.data_buffer[0];
+
+          self.write_memory_register(hardware, new_value);
+
+          self.saw_prefix_opcode = false;
+          self.fetch_cycle(hardware);
+        }
+      }
+      // SET 0..8, r8 | [HL]
+      (true, 0xC0..=0xFF) => {
+        if matches!(self.cycle, M1) {
+          if is_src_register_memory!(opcode) {
+            self.cycle = M2;
+          } else {
+            let src_reg = extract_src_register!(opcode);
+            let bit = (opcode >> 3) & 0x07;
+
+            perform_with_register!(
+              &self.registers,
+              src_reg,
+              (reg_value) => {
+                let new_value = reg_value | (1 << bit);
+
+                write_to_register!(&mut self.registers, src_reg, new_value);
+              }
+            );
+
+            self.saw_prefix_opcode = false;
+            self.fetch_cycle(hardware);
+          }
+        } else if matches!(self.cycle, M2) {
+          let bit = (opcode >> 3) & 0x07;
+          let reg_value = self.read_memory_register(hardware);
+          let new_value = reg_value | (1 << bit);
+
+          self.data_buffer[0] = new_value;
+
+          self.cycle = M3;
+        } else if matches!(self.cycle, M3) {
+          let new_value = self.data_buffer[0];
+
+          self.write_memory_register(hardware, new_value);
+
+          self.saw_prefix_opcode = false;
+          self.fetch_cycle(hardware);
+        }
+      }
+      // RL r8 | [HL]
+      (true, 0x10..=0x17) => {
+        if matches!(self.cycle, M1) {
+          if is_src_register_memory!(opcode) {
+            self.cycle = M2;
+          } else {
+            let src_reg = extract_src_register!(opcode);
+
+            perform_with_register!(
+              &self.registers,
+              src_reg,
+              (reg_value) => {
+                let is_carry_set = is_flag_set!(self.flags, Flag::C as u8) as u8;
+                let res = (reg_value << 1) | is_carry_set;
+
+                write_to_register!(&mut self.registers, src_reg, res);
+
+                self.toggle_flag(Flag::Z, res == 0);
+                self.toggle_flag(Flag::N, false);
+                self.toggle_flag(Flag::H, false);
+                self.toggle_flag(Flag::C, (reg_value >> 7) == 1);
+              }
+            );
+
+            self.saw_prefix_opcode = false;
+            self.fetch_cycle(hardware);
+          }
+        } else if matches!(self.cycle, M2) {
+          let reg_value = self.read_memory_register(hardware);
+          let is_carry_set = is_flag_set!(self.flags, Flag::C as u8) as u8;
+          let res = (reg_value << 1) | is_carry_set;
+
+          // Store the MSB of [HL]
+          self.data_buffer[0] = reg_value >> 7;
+          self.data_buffer[1] = res;
+
+          self.cycle = M3;
+        } else if matches!(self.cycle, M3) {
+          let reg_msb = self.data_buffer[0];
+          let res = self.data_buffer[1];
+
+          self.write_memory_register(hardware, res);
+
+          self.toggle_flag(Flag::Z, res == 0);
+          self.toggle_flag(Flag::N, false);
+          self.toggle_flag(Flag::H, false);
+          self.toggle_flag(Flag::C, reg_msb == 1);
+
+          self.saw_prefix_opcode = false;
+          self.fetch_cycle(hardware);
+        }
+      }
+      // RLC r8 | [HL]
+      (true, 0x00..=0x07) => {
+        if matches!(self.cycle, M1) {
+          if is_src_register_memory!(opcode) {
+            self.cycle = M2;
+          } else {
+            let src_reg = extract_src_register!(opcode);
+
+            perform_with_register!(
+              &self.registers,
+              src_reg,
+              (reg_value) => {
+                let res = reg_value.rotate_left(1);
+
+                write_to_register!(&mut self.registers, src_reg, res);
+
+                self.toggle_flag(Flag::Z, res == 0);
+                self.toggle_flag(Flag::N, false);
+                self.toggle_flag(Flag::H, false);
+                self.toggle_flag(Flag::C, (reg_value >> 7) == 1);
+              }
+            );
+
+            self.saw_prefix_opcode = false;
+            self.fetch_cycle(hardware);
+          }
+        } else if matches!(self.cycle, M2) {
+          let reg_value = self.read_memory_register(hardware);
+          let res = reg_value.rotate_left(1);
+
+          // Store the MSB of [HL]
+          self.data_buffer[0] = reg_value >> 7;
+          self.data_buffer[1] = res;
+
+          self.cycle = M3;
+        } else if matches!(self.cycle, M3) {
+          let reg_msb = self.data_buffer[0];
+          let res = self.data_buffer[1];
+
+          self.write_memory_register(hardware, res);
+
+          self.toggle_flag(Flag::Z, res == 0);
+          self.toggle_flag(Flag::N, false);
+          self.toggle_flag(Flag::H, false);
+          self.toggle_flag(Flag::C, reg_msb == 1);
+
+          self.saw_prefix_opcode = false;
+          self.fetch_cycle(hardware);
+        }
+      }
+      // RR r8 | [HL]
+      (true, 0x18..=0x1F) => {
+        if matches!(self.cycle, M1) {
+          if is_src_register_memory!(opcode) {
+            self.cycle = M2;
+          } else {
+            let src_reg = extract_src_register!(opcode);
+
+            perform_with_register!(
+              &self.registers,
+              src_reg,
+              (reg_value) => {
+                let is_carry_set = is_flag_set!(self.flags, Flag::C as u8) as u8;
+                let res = (reg_value >> 1) | (is_carry_set << 7);
+
+                write_to_register!(&mut self.registers, src_reg, res);
+
+                self.toggle_flag(Flag::Z, res == 0);
+                self.toggle_flag(Flag::N, false);
+                self.toggle_flag(Flag::H, false);
+                self.toggle_flag(Flag::C, (reg_value & 0x1) == 1);
+
+              }
+            );
+
+            self.saw_prefix_opcode = false;
+            self.fetch_cycle(hardware);
+          }
+        } else if matches!(self.cycle, M2) {
+          let reg_value = self.read_memory_register(hardware);
+          let is_carry_set = is_flag_set!(self.flags, Flag::C as u8) as u8;
+          let res = (reg_value >> 1) | (is_carry_set << 7);
+
+          // Store the LSB of [HL]
+          self.data_buffer[0] = reg_value & 0x1;
+          self.data_buffer[1] = res;
+
+          self.cycle = M3;
+        } else if matches!(self.cycle, M3) {
+          let reg_lsb = self.data_buffer[0];
+          let res = self.data_buffer[1];
+
+          self.write_memory_register(hardware, res);
+
+          self.toggle_flag(Flag::Z, res == 0);
+          self.toggle_flag(Flag::N, false);
+          self.toggle_flag(Flag::H, false);
+          self.toggle_flag(Flag::C, reg_lsb == 1);
+
+          self.saw_prefix_opcode = false;
+          self.fetch_cycle(hardware);
+        }
+      }
+      // RRC r8 | [HL]
+      (true, 0x08..=0x0F) => {
+        if matches!(self.cycle, M1) {
+          if is_src_register_memory!(opcode) {
+            self.cycle = M2;
+          } else {
+            let src_reg = extract_src_register!(opcode);
+
+            perform_with_register!(
+              &self.registers,
+              src_reg,
+              (reg_value) => {
+                let res = reg_value.rotate_right(1);
+
+                write_to_register!(&mut self.registers, src_reg, res);
+
+                self.toggle_flag(Flag::Z, res == 0);
+                self.toggle_flag(Flag::N, false);
+                self.toggle_flag(Flag::H, false);
+                self.toggle_flag(Flag::C, (reg_value & 0x1) == 1);
+              }
+            );
+
+            self.saw_prefix_opcode = false;
+            self.fetch_cycle(hardware);
+          }
+        } else if matches!(self.cycle, M2) {
+          let reg_value = self.read_memory_register(hardware);
+          let res = reg_value.rotate_right(1);
+
+          // Store the LSB of [HL]
+          self.data_buffer[0] = reg_value & 0x1;
+          self.data_buffer[1] = res;
+
+          self.cycle = M3;
+        } else if matches!(self.cycle, M3) {
+          let reg_lsb = self.data_buffer[0];
+          let res = self.data_buffer[1];
+
+          self.write_memory_register(hardware, res);
+
+          self.toggle_flag(Flag::Z, res == 0);
+          self.toggle_flag(Flag::N, false);
+          self.toggle_flag(Flag::H, false);
+          self.toggle_flag(Flag::C, reg_lsb == 1);
+
+          self.saw_prefix_opcode = false;
+          self.fetch_cycle(hardware);
+        }
+      }
+      // SLA r8 | [HL]
+      (true, 0x20..=0x27) => {
+        if matches!(self.cycle, M1) {
+          if is_src_register_memory!(opcode) {
+            self.cycle = M2;
+          } else {
+            let src_reg = extract_src_register!(opcode);
+
+            perform_with_register!(
+              &self.registers,
+              src_reg,
+              (reg_value) => {
+                let res = reg_value << 1;
+
+                write_to_register!(&mut self.registers, src_reg, res);
+
+                self.toggle_flag(Flag::Z, res == 0);
+                self.toggle_flag(Flag::N, false);
+                self.toggle_flag(Flag::H, false);
+                self.toggle_flag(Flag::C, (reg_value >> 7) == 1);
+              }
+            );
+
+            self.saw_prefix_opcode = false;
+            self.fetch_cycle(hardware);
+          }
+        } else if matches!(self.cycle, M2) {
+          let reg_value = self.read_memory_register(hardware);
+          let res = reg_value << 1;
+
+          self.data_buffer[0] = reg_value >> 7;
+          self.data_buffer[1] = res;
+
+          self.cycle = M3;
+        } else if matches!(self.cycle, M3) {
+          let reg_msb = self.data_buffer[0];
+          let res = self.data_buffer[1];
+
+          self.write_memory_register(hardware, res);
+
+          self.toggle_flag(Flag::Z, res == 0);
+          self.toggle_flag(Flag::N, false);
+          self.toggle_flag(Flag::H, false);
+          self.toggle_flag(Flag::C, reg_msb == 1);
+
+          self.saw_prefix_opcode = false;
+          self.fetch_cycle(hardware);
+        }
+      }
+      // SRA r8 | [HL]
+      (true, 0x28..=0x2F) => {
+        if matches!(self.cycle, M1) {
+          if is_src_register_memory!(opcode) {
+            self.cycle = M2;
+          } else {
+            let src_reg = extract_src_register!(opcode);
+
+            perform_with_register!(
+              &self.registers,
+              src_reg,
+              (reg_value) => {
+                // SRA preserves the sign bit (MSB)
+                let res = (reg_value >> 1) | (reg_value & 0x80);
+
+                write_to_register!(&mut self.registers, src_reg, res);
+
+                self.toggle_flag(Flag::Z, res == 0);
+                self.toggle_flag(Flag::N, false);
+                self.toggle_flag(Flag::H, false);
+                self.toggle_flag(Flag::C, (reg_value & 0x1) == 1);
+              }
+            );
+
+            self.saw_prefix_opcode = false;
+            self.fetch_cycle(hardware);
+          }
+        } else if matches!(self.cycle, M2) {
+          let reg_value = self.read_memory_register(hardware);
+          // SRA preserves the sign bit (MSB)
+          let res = (reg_value >> 1) | (reg_value & 0x80);
+
+          self.data_buffer[0] = reg_value & 0x1;
+          self.data_buffer[1] = res;
+
+          self.cycle = M3;
+        } else if matches!(self.cycle, M3) {
+          let reg_lsb = self.data_buffer[0];
+          let res = self.data_buffer[1];
+
+          self.write_memory_register(hardware, res);
+
+          self.toggle_flag(Flag::Z, res == 0);
+          self.toggle_flag(Flag::N, false);
+          self.toggle_flag(Flag::H, false);
+          self.toggle_flag(Flag::C, reg_lsb == 1);
+
+          self.saw_prefix_opcode = false;
+          self.fetch_cycle(hardware);
+        }
+      }
+      // SRL r8 | [HL]
+      (true, 0x38..=0x3F) => {
+        if matches!(self.cycle, M1) {
+          if is_src_register_memory!(opcode) {
+            self.cycle = M2;
+          } else {
+            let src_reg = extract_src_register!(opcode);
+
+            perform_with_register!(
+              &self.registers,
+              src_reg,
+              (reg_value) => {
+                let res = reg_value >> 1;
+
+                write_to_register!(&mut self.registers, src_reg, res);
+
+                self.toggle_flag(Flag::Z, res == 0);
+                self.toggle_flag(Flag::N, false);
+                self.toggle_flag(Flag::H, false);
+                self.toggle_flag(Flag::C, (reg_value & 0x1) == 1);
+              }
+            );
+
+            self.saw_prefix_opcode = false;
+            self.fetch_cycle(hardware);
+          }
+        } else if matches!(self.cycle, M2) {
+          let reg_value = self.read_memory_register(hardware);
+          let res = reg_value >> 1;
+
+          self.data_buffer[0] = reg_value & 0x1;
+          self.data_buffer[1] = res;
+
+          self.cycle = M3;
+        } else if matches!(self.cycle, M3) {
+          let reg_lsb = self.data_buffer[0];
+          let res = self.data_buffer[1];
+
+          self.write_memory_register(hardware, res);
+
+          self.toggle_flag(Flag::Z, res == 0);
+          self.toggle_flag(Flag::N, false);
+          self.toggle_flag(Flag::H, false);
+          self.toggle_flag(Flag::C, reg_lsb == 1);
+
+          self.saw_prefix_opcode = false;
+          self.fetch_cycle(hardware);
+        }
+      }
+      // SWAP r8 | [HL]
+      (true, 0x30..=0x37) => {
+        if matches!(self.cycle, M1) {
+          if is_src_register_memory!(opcode) {
+            self.cycle = M2;
+          } else {
+            let src_reg = extract_src_register!(opcode);
+
+            perform_with_register!(
+              &self.registers,
+              src_reg,
+              (reg_value) => {
+                let lower = reg_value & 0x0F;
+                let upper = reg_value & 0xF0;
+                let res = (lower << 4) | (upper >> 4);
+
+                write_to_register!(&mut self.registers, src_reg, res);
+
+                self.toggle_flag(Flag::Z, res == 0);
+                self.toggle_flag(Flag::N, false);
+                self.toggle_flag(Flag::H, false);
+                self.toggle_flag(Flag::C, false);
+              }
+            );
+
+            self.saw_prefix_opcode = false;
+            self.fetch_cycle(hardware);
+          }
+        } else if matches!(self.cycle, M2) {
+          let reg_value = self.read_memory_register(hardware);
+          let lower = reg_value & 0x0F;
+          let upper = reg_value & 0xF0;
+          let res = (lower << 4) | (upper >> 4);
+
+          self.data_buffer[0] = res;
+
+          self.cycle = M3;
+        } else if matches!(self.cycle, M3) {
+          let res = self.data_buffer[0];
+
+          self.write_memory_register(hardware, res);
+
+          self.toggle_flag(Flag::Z, res == 0);
+          self.toggle_flag(Flag::N, false);
+          self.toggle_flag(Flag::H, false);
+          self.toggle_flag(Flag::C, false);
+
+          self.saw_prefix_opcode = false;
+          self.fetch_cycle(hardware);
+        }
       }
     }
   }
 
-  /// Writes the value to the [`Register`].
-  fn write_register(&mut self, hardware: &mut Hardware, register: Register, value: u8) {
-    match register {
-      Register::A => self.registers.a = value,
-      Register::B => self.registers.b = value,
-      Register::C => self.registers.c = value,
-      Register::D => self.registers.d = value,
-      Register::E => self.registers.e = value,
-      Register::H => self.registers.h = value,
-      Register::L => self.registers.l = value,
-      Register::M => {
-        let address = ((self.registers.h as u16) << 8) | (self.registers.l as u16);
+  /// Handles any of the currently requested interrupts.
+  pub fn handle_interrupts(&mut self, hardware: &mut Hardware) {
+    use CpuCycle::*;
 
-        hardware.write_byte(address, value);
+    if matches!(self.cycle, M1) {
+      // Undo the increment from the end of the previous instruction
+      self.registers.pc = self.registers.pc.wrapping_sub(1);
+
+      self.cycle = M2;
+    } else if matches!(self.cycle, M2) {
+      self.registers.sp = self.registers.sp.wrapping_sub(1);
+
+      self.cycle = M3;
+    } else if matches!(self.cycle, M3) {
+      let pc_high = (self.registers.pc >> 8) as u8;
+
+      hardware.write_byte(self.registers.sp, pc_high);
+
+      self.registers.sp = self.registers.sp.wrapping_sub(1);
+
+      self.cycle = M4;
+    } else if matches!(self.cycle, M4) {
+      let pc_low = (self.registers.pc & 0x00FF) as u8;
+
+      hardware.write_byte(self.registers.sp, pc_low);
+
+      // Interrupts with a smaller bit value have higher priority.
+      //
+      // The master interrupt is disabled before calling the handler of the interrupt.
+      //
+      // See https://gbdev.io/pandocs/Interrupts.html for more.
+      if hardware.is_interrupt_requested(Interrupt::VBlank) {
+        self.registers.pc = 0x0040;
+        hardware.clear_interrupt(Interrupt::VBlank);
+      } else if hardware.is_interrupt_requested(Interrupt::Lcd) {
+        self.registers.pc = 0x0048;
+        hardware.clear_interrupt(Interrupt::Lcd);
+      } else if hardware.is_interrupt_requested(Interrupt::Timer) {
+        self.registers.pc = 0x0050;
+        hardware.clear_interrupt(Interrupt::Timer);
+      } else if hardware.is_interrupt_requested(Interrupt::Serial) {
+        self.registers.pc = 0x0058;
+        hardware.clear_interrupt(Interrupt::Serial);
+      } else if hardware.is_interrupt_requested(Interrupt::Joypad) {
+        self.registers.pc = 0x0060;
+        hardware.clear_interrupt(Interrupt::Joypad);
+      } else {
+        // TODO: This may be wrong for cycle accuracy edge cases
+        debug_assert!(false, "no pending interrupt");
       }
+
+      self.interrupt_master_enabled = false;
+
+      self.cycle = M5;
+    } else if matches!(self.cycle, M5) {
+      self.state = CpuState::Running;
+
+      self.fetch_cycle(hardware);
     }
   }
 
-  /// Reads the value of the [`RegisterPair`].
-  fn read_register_pair(&self, register_pair: RegisterPair) -> u16 {
-    match register_pair {
-      RegisterPair::AF => ((self.registers.a as u16) << 8) | (self.flags as u16),
-      RegisterPair::BC => ((self.registers.b as u16) << 8) | (self.registers.c as u16),
-      RegisterPair::DE => ((self.registers.d as u16) << 8) | (self.registers.e as u16),
-      RegisterPair::HL => ((self.registers.h as u16) << 8) | (self.registers.l as u16),
-      RegisterPair::SP => self.registers.sp,
+  /// Returns the current byte.
+  pub fn current_byte(&self, hardware: &Hardware) -> u8 {
+    const HIGH_RAM_START: u16 = 0xFF80;
+
+    match hardware.get_dma_transfer() {
+      // If a DMA transfer is in progress and the program counter is in high ram,
+      // then the next byte being fetched is the byte that is being transferred.
+      Some(&DmaTransfer::Transferring { ticks }) if self.registers.pc < HIGH_RAM_START => {
+        let index = ticks / 4;
+
+        hardware.read_byte(index << 8)
+      }
+      _ => hardware.read_byte(self.registers.pc),
     }
   }
 
-  /// Writes the value to the following [`RegisterPair`].
-  fn write_register_pair(&mut self, register_pair: RegisterPair, value: u16) {
-    match register_pair {
-      RegisterPair::AF => {
-        self.registers.a = ((value >> 8) & 0xFF) as u8;
-        self.flags = (value & 0xF0) as u8;
-      }
-      RegisterPair::BC => {
-        self.registers.b = ((value >> 8) & 0xFF) as u8;
-        self.registers.c = (value & 0xFF) as u8;
-      }
-      RegisterPair::DE => {
-        self.registers.d = ((value >> 8) & 0xFF) as u8;
-        self.registers.e = (value & 0xFF) as u8;
-      }
-      RegisterPair::HL => {
-        self.registers.h = ((value >> 8) & 0xFF) as u8;
-        self.registers.l = (value & 0xFF) as u8;
-      }
-      RegisterPair::SP => {
-        self.registers.sp = value;
-      }
+  /// Fetches the next byte.
+  pub fn fetch_byte(&mut self, hardware: &Hardware) -> u8 {
+    let byte = self.current_byte(hardware);
+
+    // The program counter shouldn't be incremented when we're in a bugged halt state.
+    if self.halt_bug {
+      self.halt_bug = false;
+    } else {
+      self.registers.pc = self.registers.pc.wrapping_add(1);
     }
+
+    byte
   }
 
-  /// Pops 16-bits of memory from the stack.
-  fn pop_stack_word(&mut self, hardware: &Hardware) -> u16 {
-    let lower = hardware.read_byte(self.registers.sp);
-    let upper = hardware.read_byte(self.registers.sp.wrapping_add(1));
-    let word = ((upper as u16) << 8) | lower as u16;
+  /// Marks the completion of the current execution.
+  fn complete_cycle(&mut self, hardware: &mut Hardware) {
+    self.cycle = CpuCycle::M1;
 
-    self.registers.sp = self.registers.sp.wrapping_add(2);
+    self.last_instruction = self.registers.ir;
 
-    word
+    // The CPU indefinitely fetches the next instruction byte, even if there are interrupts.
+    self.registers.ir = self.fetch_byte(hardware);
   }
 
-  /// Pushes the 16-bit value on to the stack.
-  fn push_stack_word(&mut self, hardware: &mut Hardware, value: u16) {
-    let upper = ((value >> 8) & 0xFF) as u8;
-    let lower = (value & 0xFF) as u8;
+  /// Marks the completion of the current execution and fetches the next cycle.
+  fn fetch_cycle(&mut self, hardware: &mut Hardware) {
+    self.complete_cycle(hardware);
 
-    hardware.write_byte(self.registers.sp.wrapping_sub(1), upper);
-    hardware.write_byte(self.registers.sp.wrapping_sub(2), lower);
+    // Only process interrupts when the IME is also enabled.
+    self.should_handle_interrupts =
+      self.interrupt_master_enabled && hardware.has_pending_interrupts();
+  }
 
-    self.registers.sp = self.registers.sp.wrapping_sub(2);
+  /// Reads a value from the memory register.
+  fn read_memory_register(&self, hardware: &Hardware) -> u8 {
+    let address = ((self.registers.h as u16) << 8) | (self.registers.l as u16);
+
+    hardware.read_byte(address)
+  }
+
+  /// Writes the value to the memory register.
+  fn write_memory_register(&mut self, hardware: &mut Hardware, value: u8) {
+    let address = ((self.registers.h as u16) << 8) | (self.registers.l as u16);
+
+    hardware.write_byte(address, value);
   }
 
   /// Returns whether the following [`ConditionalFlag`] is set.
@@ -1704,24 +2626,114 @@ impl Cpu {
   }
 }
 
-/// The internal time clock.
-#[derive(Debug, Default, Clone, Eq, PartialEq)]
-struct ClockState {
-  /// Machine cycles.
-  pub m_cycles: usize,
-  /// Tick cycles.
-  pub t_cycles: usize,
-}
-
-impl ClockState {
-  /// Advances the internal state by 1 M-cycle.
-  pub fn tick(&mut self) {
-    self.advance(1);
+mod macros {
+  /// Calls a function passing the value of the register.
+  macro_rules! perform_with_register {
+    ($registers:expr, $register_operand:expr, ($value:ident) => $action:expr) => {
+      if $register_operand == registers::REGISTER_A {
+        let $value = $registers.a;
+        $action;
+      } else if $register_operand == registers::REGISTER_B {
+        let $value = $registers.b;
+        $action;
+      } else if $register_operand == registers::REGISTER_C {
+        let $value = $registers.c;
+        $action;
+      } else if $register_operand == registers::REGISTER_D {
+        let $value = $registers.d;
+        $action;
+      } else if $register_operand == registers::REGISTER_E {
+        let $value = $registers.e;
+        $action;
+      } else if $register_operand == registers::REGISTER_H {
+        let $value = $registers.h;
+        $action;
+      } else if $register_operand == registers::REGISTER_L {
+        let $value = $registers.l;
+        $action;
+      } else if $register_operand == registers::REGISTER_M {
+        debug_assert!(false, "passed register M to perform_with_register");
+      }
+    };
   }
 
-  /// Advance the internal state by the following amount of M-cycles.
-  pub fn advance(&mut self, m_cycles: usize) {
-    self.m_cycles = self.m_cycles.wrapping_add(m_cycles);
-    self.t_cycles = self.t_cycles.wrapping_add(m_cycles * 4);
+  /// Writes to the value to the register.
+  macro_rules! write_to_register {
+    ($registers:expr, $dest_register:expr, $value:expr) => {
+      if $dest_register == registers::REGISTER_A {
+        $registers.a = $value;
+      } else if $dest_register == registers::REGISTER_B {
+        $registers.b = $value;
+      } else if $dest_register == registers::REGISTER_C {
+        $registers.c = $value;
+      } else if $dest_register == registers::REGISTER_D {
+        $registers.d = $value;
+      } else if $dest_register == registers::REGISTER_E {
+        $registers.e = $value;
+      } else if $dest_register == registers::REGISTER_H {
+        $registers.h = $value;
+      } else if $dest_register == registers::REGISTER_L {
+        $registers.l = $value;
+      } else if $dest_register == registers::REGISTER_M {
+        debug_assert!(false, "cannot write to register M");
+      }
+    };
   }
+
+  // Extracts the conditional flag, stored in bits 4 and 5, from an opcode.
+  macro_rules! get_conditional_flag {
+    ($opcode:expr) => {
+      match ($opcode >> 3) & 0x03 {
+        0b00 => ConditionalFlag::NZ,
+        0b01 => ConditionalFlag::Z,
+        0b10 => ConditionalFlag::NC,
+        0b11 => ConditionalFlag::C,
+        _ => unreachable!(),
+      }
+    };
+  }
+
+  // Extracts the destination register bits from an opcode.
+  macro_rules! extract_dest_register {
+    ($opcode:expr) => {
+      ($opcode >> 3) & 0x07
+    };
+  }
+
+  // Extracts the source register bits from an opcode.
+  macro_rules! extract_src_register {
+    ($opcode:expr) => {
+      $opcode & 0x07
+    };
+  }
+
+  // Extracts the register pair bits from an opcode.
+  macro_rules! extract_register_pair {
+    ($opcode:expr) => {
+      ($opcode >> 4) & 0x03
+    };
+  }
+
+  // Checks whether the destination register, in an opcode, is the memory register.
+  macro_rules! is_dest_register_memory {
+    ($opcode:expr) => {
+      extract_dest_register!($opcode) == registers::REGISTER_M
+    };
+  }
+
+  // Checks whether the source register, in an opcode, is the memory register.
+  macro_rules! is_src_register_memory {
+    ($opcode:expr) => {
+      extract_src_register!($opcode) == registers::REGISTER_M
+    };
+  }
+
+  pub(crate) use extract_dest_register;
+  pub(crate) use extract_register_pair;
+  pub(crate) use extract_src_register;
+  pub(crate) use get_conditional_flag;
+  pub(crate) use is_dest_register_memory;
+  pub(crate) use is_src_register_memory;
+  pub(crate) use perform_with_register;
+  pub(crate) use write_to_register;
 }

@@ -121,14 +121,6 @@ impl Hardware {
     }
   }
 
-  /// Reads 16-bits in memory, in little endian, from the given address.
-  pub fn read_word(&self, address: u16) -> u16 {
-    let lower = self.read_byte(address) as u16;
-    let upper = self.read_byte(address.wrapping_add(1)) as u16;
-
-    (upper << 8) | lower
-  }
-
   /// Writes 8-bits to memory at the specified address.
   pub fn write_byte(&mut self, address: u16, value: u8) {
     match address {
@@ -178,96 +170,49 @@ impl Hardware {
     }
   }
 
-  /// Progresses the DMA transfer, copying the next byte in to the OAM.
-  pub fn update_dma_transfer(&mut self, cycles: usize) {
+  /// Steps the DMA transfer by one T-cycle.
+  pub fn step_dma_transfer(&mut self) {
     match self.ppu.dma_transfer {
       Some(DmaTransfer::Requested) => {
-        // There's a delay of 1 M-cycle when executing DMA, so we have a filler state
-        self.ppu.dma_transfer = Some(DmaTransfer::Starting);
+        self.ppu.dma_transfer = Some(DmaTransfer::Starting { ticks: 0 });
       }
-      Some(DmaTransfer::Starting) => {
-        self.ppu.dma_transfer = Some(DmaTransfer::Transferring { current_pos: 0 });
+      Some(DmaTransfer::Starting { ticks }) => {
+        const DMA_TRANSFER_DELAY: u8 = 4;
+
+        let new_ticks = ticks + 1;
+
+        self.ppu.dma_transfer = Some(DmaTransfer::Starting { ticks: new_ticks });
+
+        if new_ticks == DMA_TRANSFER_DELAY {
+          self.ppu.dma_transfer = Some(DmaTransfer::Transferring { ticks: 0 })
+        }
       }
-      Some(DmaTransfer::Transferring { current_pos }) => {
-        const DMA_MAX_BYTES_TRANSFERRABLE: u16 = 160;
+      Some(DmaTransfer::Transferring { ticks }) => {
+        const CLOCKS_PER_TRANSFER: u16 = 4;
+        const DMA_TRANSFER_MAX_BYTES: u16 = 160;
+        const DMA_TRANSFER_DURATION: u16 = DMA_TRANSFER_MAX_BYTES * CLOCKS_PER_TRANSFER;
 
-        let mut index = current_pos as u16;
-        let starting_address = (self.ppu.dma as u16) << 8;
-        let remaining_bytes = DMA_MAX_BYTES_TRANSFERRABLE - index;
-        let iterations = (cycles as u16 / 4).min(remaining_bytes);
+        let new_ticks = ticks + 1;
 
-        for _ in 0..iterations {
+        // An M-cycle has occured, so transfer a byte
+        if new_ticks % CLOCKS_PER_TRANSFER == 0 {
+          let starting_address = (self.ppu.dma as u16) << 8;
+          let index = ticks / CLOCKS_PER_TRANSFER;
           let src_byte = self.read_byte(starting_address + index);
 
-          // Use `Ppu::write_oam` method because Hardware::write_byte` checks for
-          // active DMA transfers.
+          // Use `Ppu::write_oam` because Hardware::write_byte` checks for active DMA transfers.
           self.ppu.write_oam(0xFE00 + index, src_byte);
-
-          index += 1;
         }
 
-        if index >= DMA_MAX_BYTES_TRANSFERRABLE {
+        // Subtract 4 because we pre-emptively increment the ticks
+        if new_ticks == DMA_TRANSFER_DURATION - CLOCKS_PER_TRANSFER {
           self.ppu.dma_transfer = None;
         } else {
-          self.ppu.dma_transfer = Some(DmaTransfer::Transferring {
-            current_pos: index as u8,
-          })
+          self.ppu.dma_transfer = Some(DmaTransfer::Transferring { ticks: new_ticks });
         }
       }
       None => {}
     }
-  }
-
-  /// Updates the joypad's button state for the [`Button`].
-  pub fn update_button(&mut self, button: Button, button_state: ButtonAction) {
-    self
-      .joypad
-      .update_button_state(&mut self.interrupts, button, button_state);
-  }
-
-  /// Steps the timer with the following number of cycles.
-  pub fn step_timer(&mut self, cycles: usize) {
-    self.timer.step(&mut self.interrupts, cycles);
-  }
-
-  /// Steps the PPU with the following number of cycles.
-  pub fn step_ppu(&mut self, cycles: usize) {
-    self.ppu.step(&mut self.interrupts, cycles);
-  }
-
-  /// Steps the APU with the following number of cycles.
-  pub fn step_apu(&mut self, cycles: usize) {
-    self.apu.step(cycles);
-  }
-
-  pub fn audio_buffer(&self) -> Arc<Mutex<VecDeque<AudioSample>>> {
-    self.apu.audio_buffer()
-  }
-
-  /// Checks if there are any pending interrupts.
-  pub fn has_pending_interrupts(&self) -> bool {
-    (self.interrupts.enabled_bitfield() & self.interrupts.requested_bitfield()) != 0
-  }
-
-  /// Checks if the following interrupt has been requested.
-  pub fn is_interrupt_requested(&self, interrupt: Interrupt) -> bool {
-    is_flag_set!(self.interrupts.enabled_bitfield(), interrupt as u8)
-      && is_flag_set!(self.interrupts.requested_bitfield(), interrupt as u8)
-  }
-
-  /// Clears a requested [`Interrupt`].
-  pub fn clear_interrupt(&mut self, interrupt: Interrupt) {
-    self.interrupts.clear_interrupt(interrupt);
-  }
-
-  /// Gets the active DMA transfer.
-  pub fn get_dma_transfer(&self) -> Option<&DmaTransfer> {
-    self.ppu.dma_transfer.as_ref()
-  }
-
-  /// Gets the frame buffer from the PPU.
-  pub fn frame_buffer(&self) -> &[[u8; 160]; 144] {
-    self.ppu.buffer()
   }
 
   /// Reads the I/O registers.
@@ -296,6 +241,64 @@ impl Hardware {
       0xFF0F => self.interrupts.set_requested(value),
       _ => {}
     }
+  }
+
+  /// Returns whether there is an active DMA transfer.
+  pub fn dma_transfer_running(&self) -> bool {
+    self.ppu.dma_transfer.is_some()
+  }
+
+  /// Updates the joypad's button state for the [`Button`].
+  pub fn update_button(&mut self, button: Button, button_state: ButtonAction) {
+    self
+      .joypad
+      .update_button_state(&mut self.interrupts, button, button_state);
+  }
+
+  /// Steps the timer with the following number of cycles.
+  pub fn step_timer(&mut self, cycles: usize) {
+    self.timer.step(&mut self.interrupts, cycles);
+  }
+
+  /// Steps the PPU with the following number of cycles.
+  pub fn step_ppu(&mut self, cycles: usize) {
+    self.ppu.step(&mut self.interrupts, cycles);
+  }
+
+  /// Steps the APU with the following number of cycles.
+  pub fn step_apu(&mut self, cycles: usize) {
+    self.apu.step(cycles);
+  }
+
+  /// Returns the audio buffer.
+  pub fn audio_buffer(&self) -> Arc<Mutex<VecDeque<AudioSample>>> {
+    self.apu.audio_buffer()
+  }
+
+  /// Checks if there are any pending interrupts.
+  pub fn has_pending_interrupts(&self) -> bool {
+    (self.interrupts.enabled_bitfield() & self.interrupts.requested_bitfield()) != 0
+  }
+
+  /// Checks if the following interrupt has been requested.
+  pub fn is_interrupt_requested(&self, interrupt: Interrupt) -> bool {
+    is_flag_set!(self.interrupts.enabled_bitfield(), interrupt as u8)
+      && is_flag_set!(self.interrupts.requested_bitfield(), interrupt as u8)
+  }
+
+  /// Clears a requested [`Interrupt`].
+  pub fn clear_interrupt(&mut self, interrupt: Interrupt) {
+    self.interrupts.clear_interrupt(interrupt);
+  }
+
+  /// Gets the active DMA transfer.
+  pub fn get_dma_transfer(&self) -> Option<&DmaTransfer> {
+    self.ppu.dma_transfer.as_ref()
+  }
+
+  /// Gets the frame buffer from the PPU.
+  pub fn frame_buffer(&self) -> &[[u8; 160]; 144] {
+    self.ppu.buffer()
   }
 }
 

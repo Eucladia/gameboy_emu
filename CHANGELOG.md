@@ -8,6 +8,7 @@ and this project does not adhere to [Semantic Versioning](https://semver.org/spe
 ## [Unreleased]
 
 ### Added
+- T-cycle accuracy.
 - Support for incrementing and decrementing the master volume via `Shift` + `+` / `-`.
 - Toggleable volume overlay when pressing `Shift` + `1`.
 - Basic guide.

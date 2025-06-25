@@ -1,4 +1,4 @@
-use crate::hardware::{Cpu, Hardware, cpu::CpuState};
+use crate::hardware::{Cpu, Hardware};
 
 /// The Gameboy emulator.
 #[derive(Debug)]
@@ -17,33 +17,18 @@ impl Emulator {
 
   /// Steps one frame of the Gameboy.
   pub fn step(&mut self) {
-    // The number of ticks per frame.
+    // The number of T-cycles per frame.
     const CYCLES_PER_FRAME: usize = 70224;
 
-    let mut total_cycles = 0;
+    for _ in 0..CYCLES_PER_FRAME {
+      self.cpu.step(&mut self.hardware);
+      self.hardware.step_timer(1);
+      self.hardware.step_ppu(1);
+      self.hardware.step_apu(1);
 
-    while total_cycles < CYCLES_PER_FRAME {
-      let cycles = if matches!(self.cpu.state(), CpuState::Halted | CpuState::Stopped) {
-        4
-      } else {
-        self.cpu.step(&mut self.hardware)
-      };
-
-      self.hardware.step_timer(cycles);
-
-      if self.hardware.get_dma_transfer().is_some() {
-        self.hardware.update_dma_transfer(cycles);
+      if self.hardware.dma_transfer_running() {
+        self.hardware.step_dma_transfer();
       }
-
-      self.hardware.step_ppu(cycles);
-
-      self.hardware.step_apu(cycles);
-
-      if self.hardware.has_pending_interrupts() {
-        self.cpu.handle_interrupts(&mut self.hardware);
-      }
-
-      total_cycles += cycles;
     }
   }
 }

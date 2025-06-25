@@ -1,7 +1,6 @@
 mod emulator;
 mod flags;
 mod hardware;
-mod instructions;
 mod interrupts;
 
 use emulator::Emulator;
@@ -45,7 +44,6 @@ const INITIAL_GAMEBOY_WIDTH: u32 = GAMEBOY_WIDTH * 6;
 const INITIAL_GAMEBOY_HEIGHT: u32 = GAMEBOY_HEIGHT * 6;
 
 /// The maximum length of the text buffer used to draw text.
-// 16 bytes is more than enough for both the FPS counter and volume.
 const TEXT_BUFFER_MAX_LENGTH: usize = 16;
 
 fn main() {

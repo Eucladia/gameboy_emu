@@ -48,25 +48,3 @@ pub enum ConditionalFlag {
   /// Continues control flow if a carry was not produced.
   NC,
 }
-
-impl ConditionalFlag {
-  /// Attempts to convert the 2-bit value into a [`ConditionalFlag`].
-  pub fn from_bits(bits: u8) -> Option<Self> {
-    ConditionalFlag::try_from(bits).ok()
-  }
-}
-
-impl TryFrom<u8> for ConditionalFlag {
-  type Error = ();
-
-  /// Attempts to convert the byte into a [`ConditionalFlag`].
-  fn try_from(bits: u8) -> Result<Self, Self::Error> {
-    Ok(match bits {
-      0b00 => ConditionalFlag::NZ,
-      0b01 => ConditionalFlag::Z,
-      0b10 => ConditionalFlag::NC,
-      0b11 => ConditionalFlag::C,
-      _ => return Err(()),
-    })
-  }
-}

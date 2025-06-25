@@ -50,6 +50,17 @@ pub struct Ppu {
   pub dma_transfer: Option<DmaTransfer>,
 }
 
+/// The state of a direct memory transfer.
+#[derive(Debug, Clone)]
+pub enum DmaTransfer {
+  /// A DMA transfer was requested.
+  Requested,
+  /// A DMA transfer is going to begin, once 4 T-cycles have elapsed.
+  Starting { ticks: u8 },
+  /// A DMA transfer that is in progress with the following dots.
+  Transferring { ticks: u16 },
+}
+
 impl Ppu {
   /// Creates a new [`Ppu`].
   pub fn new() -> Self {
@@ -587,17 +598,6 @@ enum LcdControl {
   WindowTileMap = 1 << 6,
   /// Whether the LCD should be on.
   LcdDisplay = 1 << 7,
-}
-
-/// The state of a direct memory transfer.
-#[derive(Debug, Clone)]
-pub enum DmaTransfer {
-  /// A DMA transfer was requested.
-  Requested,
-  /// A DMA transfer is going to begin.
-  Starting,
-  /// A DMA transfer is in progress, copying the byte with this index.
-  Transferring { current_pos: u8 },
 }
 
 impl TryFrom<u8> for PpuMode {

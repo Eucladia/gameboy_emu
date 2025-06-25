@@ -14,8 +14,8 @@ pub struct Timer {
   /// The internal 16-bit counter used for DIV (upper 8 bits) and for timing.
   counter: u16,
 
-  /// Whether the previous step produced an overflow.
-  overflowed: bool,
+  /// The number of ticks until an interrupt will be fired, if any.
+  ticks_til_interrupt: u8,
   /// The previous AND result.
   ///
   /// The AND result is described as the extracted bit from doing the following:
@@ -32,7 +32,7 @@ impl Timer {
       tac: 0,
       counter: 0xABCC,
 
-      overflowed: false,
+      ticks_til_interrupt: 0,
       prev_and_result: false,
     }
   }
@@ -42,13 +42,14 @@ impl Timer {
     for _ in 0..cycles {
       self.counter = self.counter.wrapping_add(1);
 
-      // Technically the reload and timer request should be delayed by 4 T-cycles,
-      // but we only call this fn at most every 4 T-cycles, so this should be good.
-      if self.overflowed {
-        self.overflowed = false;
-        self.tima = self.tma;
+      // The interrupt gets delayed by 4 T-cycles after TIMA overflows.
+      if self.ticks_til_interrupt > 0 {
+        self.ticks_til_interrupt -= 1;
 
-        interrupts.request_interrupt(Interrupt::Timer);
+        if self.ticks_til_interrupt == 0 {
+          self.tima = self.tma;
+          interrupts.request_interrupt(Interrupt::Timer);
+        }
       } else {
         // Compare the extracted bit of the updated counter with the timer enable bit
         let curr_and_result = is_flag_set!(self.tac, TIMER_ENABLE_MASK)
@@ -56,7 +57,7 @@ impl Timer {
 
         if self.prev_and_result && !curr_and_result {
           self.tima = self.tima.wrapping_add(1);
-          self.overflowed = self.tima == 0;
+          self.ticks_til_interrupt = if self.tima == 0 { 4 } else { 0 };
         }
 
         self.prev_and_result = curr_and_result;
@@ -86,9 +87,9 @@ impl Timer {
       0xFF05 => {
         // If TIMA is written to during the 4 T-cycles after a TIMA overflow,
         // then the TMA reload and interrupt request are aborted.
-        if self.overflowed {
+        if self.ticks_til_interrupt > 0 {
           self.tima = value;
-          self.overflowed = false;
+          self.ticks_til_interrupt = 0;
         } else {
           self.tima = value;
         }
@@ -210,7 +211,7 @@ mod test {
     timer.step(&mut interrupts, 1);
 
     assert_eq!(timer.tima, 0);
-    assert!(timer.overflowed);
+    assert!(timer.ticks_til_interrupt > 0);
 
     // Write to TIMA to cancel the interrupt request and reload
     timer.write_register(0xFF05, 0x0F);
@@ -218,7 +219,7 @@ mod test {
     timer.step(&mut interrupts, 4);
 
     assert_eq!(timer.tima, 0x0F);
-    assert!(!timer.overflowed);
+    assert!(!timer.ticks_til_interrupt > 0);
     assert!(!interrupts.is_requested(Interrupt::Timer));
   }
 
@@ -238,7 +239,7 @@ mod test {
     timer.step(&mut interrupts, 1);
 
     assert_eq!(timer.tima, 0);
-    assert!(timer.overflowed);
+    assert!(timer.ticks_til_interrupt > 0);
 
     // Write a new value to TMA
     timer.write_register(0xFF06, 0x1C);

@@ -1,3 +1,31 @@
+/// The value for the register pair BC.
+pub const REGISTER_PAIR_BC: u8 = 0b00;
+/// The value for the register pair DE.
+pub const REGISTER_PAIR_DE: u8 = 0b01;
+/// The value for the register pair HL.
+pub const REGISTER_PAIR_HL: u8 = 0b10;
+/// The value for the register pair AF.
+pub const REGISTER_PAIR_AF: u8 = 0b11;
+/// The value for the register pair SP.
+pub const REGISTER_PAIR_SP: u8 = 0b11;
+
+/// The `A` register.
+pub const REGISTER_A: u8 = 0b111;
+/// The `B` register.
+pub const REGISTER_B: u8 = 0b000;
+/// The `C` register.
+pub const REGISTER_C: u8 = 0b001;
+/// The `D` register.
+pub const REGISTER_D: u8 = 0b010;
+/// The `E` register.
+pub const REGISTER_E: u8 = 0b011;
+/// The `H` register.
+pub const REGISTER_H: u8 = 0b100;
+/// The `L` register.
+pub const REGISTER_L: u8 = 0b101;
+/// The memory "register."
+pub const REGISTER_M: u8 = 0b110;
+
 /// The status of the registers.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Registers {
@@ -25,70 +53,6 @@ pub struct Registers {
   pub ir: u8,
 }
 
-/// A register.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum Register {
-  /// The register `A`.
-  A,
-  /// The register `B`.
-  B,
-  /// The register `C`.
-  C,
-  /// The register `D`.
-  D,
-  /// The register `E`.
-  E,
-  /// The register `H`.
-  H,
-  /// The register `L`.
-  L,
-  /// Psuedo-register that points to the memory at the address of the register pair `HL`.
-  M,
-}
-
-/// A register pair.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-#[allow(non_camel_case_types)]
-pub enum RegisterPair {
-  /// Psuedo-register of the accumulator & flags that can be used in 16-bit contexts.
-  AF,
-  /// The register `B` paired with the register `C`.
-  BC,
-  /// The register `D` paired with the register `E`.
-  DE,
-  /// The register `H` paired with the register `L`.
-  HL,
-  /// Psuedo-register of the stack pointer.
-  SP,
-}
-
-impl Register {
-  /// Returns a register from its encoded 3 bits.
-  pub fn from_bits(bits: u8) -> Option<Self> {
-    Register::try_from(bits).ok()
-  }
-}
-
-impl RegisterPair {
-  // Gets a register pair from 2 bits. If `use_psw` is true, then `0x2` will
-  // return [`RegisterPair::AF`] instead of [`RegisterPair::SP`].
-  pub fn from_bits(bits: u8, use_psw: bool) -> Option<Self> {
-    Some(match bits {
-      0b00 => RegisterPair::BC,
-      0b01 => RegisterPair::DE,
-      0b10 => RegisterPair::HL,
-      0b11 => {
-        if use_psw {
-          RegisterPair::AF
-        } else {
-          RegisterPair::SP
-        }
-      }
-      _ => return None,
-    })
-  }
-}
-
 impl Default for Registers {
   fn default() -> Self {
     Self {
@@ -103,24 +67,5 @@ impl Default for Registers {
       sp: u16::MAX,
       ir: 0,
     }
-  }
-}
-
-impl TryFrom<u8> for Register {
-  type Error = ();
-
-  /// Attempts to convert the byte into a [`Register`].
-  fn try_from(value: u8) -> Result<Self, Self::Error> {
-    Ok(match value {
-      0b000 => Register::B,
-      0b001 => Register::C,
-      0b010 => Register::D,
-      0b011 => Register::E,
-      0b100 => Register::H,
-      0b101 => Register::L,
-      0b110 => Register::M,
-      0b111 => Register::A,
-      _ => return Err(()),
-    })
   }
 }
