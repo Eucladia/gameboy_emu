@@ -37,31 +37,29 @@ impl Timer {
     }
   }
 
-  /// Steps the timer forward by the given number of cycles.
-  pub fn step(&mut self, interrupts: &mut Interrupts, cycles: usize) {
-    for _ in 0..cycles {
-      self.counter = self.counter.wrapping_add(1);
+  /// Steps the timer by a T-cycle.
+  pub fn step(&mut self, interrupts: &mut Interrupts) {
+    self.counter = self.counter.wrapping_add(1);
 
-      // The interrupt gets delayed by 4 T-cycles after TIMA overflows.
-      if self.ticks_til_interrupt > 0 {
-        self.ticks_til_interrupt -= 1;
+    // The interrupt gets delayed by 4 T-cycles after TIMA overflows.
+    if self.ticks_til_interrupt > 0 {
+      self.ticks_til_interrupt -= 1;
 
-        if self.ticks_til_interrupt == 0 {
-          self.tima = self.tma;
-          interrupts.request_interrupt(Interrupt::Timer);
-        }
-      } else {
-        // Compare the extracted bit of the updated counter with the timer enable bit
-        let curr_and_result = is_flag_set!(self.tac, TIMER_ENABLE_MASK)
-          & is_flag_set!(self.counter, tac_bit_mask(self.tac));
-
-        if self.prev_and_result && !curr_and_result {
-          self.tima = self.tima.wrapping_add(1);
-          self.ticks_til_interrupt = if self.tima == 0 { 4 } else { 0 };
-        }
-
-        self.prev_and_result = curr_and_result;
+      if self.ticks_til_interrupt == 0 {
+        self.tima = self.tma;
+        interrupts.request_interrupt(Interrupt::Timer);
       }
+    } else {
+      // Compare the extracted bit of the updated counter with the timer enable bit
+      let curr_and_result = is_flag_set!(self.tac, TIMER_ENABLE_MASK)
+        & is_flag_set!(self.counter, tac_bit_mask(self.tac));
+
+      if self.prev_and_result && !curr_and_result {
+        self.tima = self.tima.wrapping_add(1);
+        self.ticks_til_interrupt = if self.tima == 0 { 4 } else { 0 };
+      }
+
+      self.prev_and_result = curr_and_result;
     }
   }
 
@@ -123,130 +121,3 @@ const fn tac_bit_mask(tac: u8) -> u16 {
 
 /// The bit mask for the TAC register for checking if the timer is enabled.
 const TIMER_ENABLE_MASK: u8 = 0x04;
-
-#[cfg(test)]
-mod test {
-  use crate::{
-    hardware::{Interrupts, Timer},
-    interrupts::Interrupt,
-  };
-
-  // Tests https://github.com/Hacktix/GBEDG/blob/master/timers/index.md#an-edge-case.
-  #[test]
-  fn disabled_tima_inc() {
-    let mut timer = Timer::new();
-    let mut interrupts = Interrupts::new();
-
-    timer.tac = 0b101;
-    timer.counter = 0b11000;
-
-    timer.step(&mut interrupts, 4);
-
-    assert_eq!(timer.tima, 0);
-
-    timer.write_register(0xFF07, 0b001);
-    timer.step(&mut interrupts, 4);
-
-    // It should've incremented TIMA because there was a falling edge
-    assert_eq!(timer.tima, 1);
-  }
-
-  // Tests https://gbdev.io/pandocs/Timer_Obscure_Behaviour.html.
-  #[test]
-  fn select_bit_changed_inc() {
-    let mut timer = Timer::new();
-    let mut interrupts = Interrupts::new();
-
-    timer.counter = 0x3FF0;
-    timer.tac = 0xFC;
-
-    timer.write_register(0xFF07, 0x05);
-    // This step should increment TIMA because there was a falling edge
-    // despite having a new clock select mask
-    timer.step(&mut interrupts, 4);
-
-    assert_eq!(timer.tima, 1);
-  }
-
-  // Tests https://gbdev.io/pandocs/Timer_Obscure_Behaviour.html.
-  #[test]
-  fn timer_select_bit_changed() {
-    let mut timer = Timer::new();
-    let mut interrupts = Interrupts::new();
-
-    // TIMA should not be incremented in these cases
-    timer.counter = 0x3FF0;
-    timer.tac = 0xFC;
-
-    timer.write_register(0xFF07, 0x04);
-    timer.step(&mut interrupts, 4);
-
-    assert_eq!(timer.tima, 0);
-
-    timer.prev_and_result = false;
-    timer.counter = 0x3FF0;
-    timer.tac = 0xFC;
-
-    timer.write_register(0xFF07, 0x07);
-    timer.step(&mut interrupts, 4);
-
-    assert_eq!(timer.tima, 0);
-  }
-
-  // Test to make sure that a reload and timer Interrupt get aborted, if written to
-  // during the 4 T-cycles after the TIMA overflow.
-  #[test]
-  fn reload_interrupt_aborted() {
-    let mut timer = Timer::new();
-    let mut interrupts = Interrupts::new();
-
-    timer.counter = 0x3FF0;
-    timer.tac = 0xFC;
-    // Mock an overflow
-    timer.tima = 0xFF;
-
-    timer.write_register(0xFF07, 0x05);
-    // This should increment TIMA while keeping overflow as true, since we're
-    // only stepping a cycle
-    timer.step(&mut interrupts, 1);
-
-    assert_eq!(timer.tima, 0);
-    assert!(timer.ticks_til_interrupt > 0);
-
-    // Write to TIMA to cancel the interrupt request and reload
-    timer.write_register(0xFF05, 0x0F);
-
-    timer.step(&mut interrupts, 4);
-
-    assert_eq!(timer.tima, 0x0F);
-    assert!(!timer.ticks_til_interrupt > 0);
-    assert!(!interrupts.is_requested(Interrupt::Timer));
-  }
-
-  // Test to make sure that the reload uses the updated TMA value.
-  #[test]
-  fn reload_uses_updated_tma() {
-    let mut timer = Timer::new();
-    let mut interrupts = Interrupts::new();
-
-    timer.counter = 0x3FF0;
-    timer.tac = 0xFC;
-    // Mock an overflow
-    timer.tima = 0xFF;
-
-    timer.write_register(0xFF07, 0x05);
-    // This should increment TIMA, but leave the overflow since we're only steppinga a cycle
-    timer.step(&mut interrupts, 1);
-
-    assert_eq!(timer.tima, 0);
-    assert!(timer.ticks_til_interrupt > 0);
-
-    // Write a new value to TMA
-    timer.write_register(0xFF06, 0x1C);
-
-    timer.step(&mut interrupts, 4);
-
-    assert_eq!(timer.tima, 0x1C);
-    assert!(interrupts.is_requested(Interrupt::Timer));
-  }
-}

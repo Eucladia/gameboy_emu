@@ -22,9 +22,9 @@ impl Emulator {
 
     for _ in 0..CYCLES_PER_FRAME {
       self.cpu.step(&mut self.hardware);
-      self.hardware.step_timer(1);
-      self.hardware.step_ppu(1);
-      self.hardware.step_apu(1);
+      self.hardware.step_timer();
+      self.hardware.step_ppu();
+      self.hardware.step_apu();
 
       if self.hardware.dma_transfer_running() {
         self.hardware.step_dma_transfer();

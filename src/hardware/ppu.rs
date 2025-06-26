@@ -90,9 +90,9 @@ impl Ppu {
     }
   }
 
-  /// Steps a cycle.
-  pub fn step(&mut self, interrupts: &mut Interrupts, cycles: usize) {
-    self.counter += cycles;
+  /// Steps the PPU by a T-cycle.
+  pub fn step(&mut self, interrupts: &mut Interrupts) {
+    self.counter += 1;
 
     // `LY==LYC` needs to be checked every cycle.
     if self.ly == self.lyc {

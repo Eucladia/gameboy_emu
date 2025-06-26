@@ -60,22 +60,20 @@ impl Apu {
     }
   }
 
-  /// Steps the APU.
-  pub fn step(&mut self, cycles: usize) {
+  /// Steps the APU by a T-cycle.
+  pub fn step(&mut self) {
     if !self.is_enabled() {
       return;
     }
 
-    for _ in 0..cycles {
-      self.channel1.step();
-      self.channel2.step();
-      self.channel3.step();
-      self.channel4.step();
+    self.dots += 1;
 
-      self.step_frame_sequencer();
+    self.channel1.step();
+    self.channel2.step();
+    self.channel3.step();
+    self.channel4.step();
 
-      self.dots += 1;
-    }
+    self.step_frame_sequencer();
 
     if self.dots >= SAMPLES_PER_CYCLE {
       self.dots -= SAMPLES_PER_CYCLE;

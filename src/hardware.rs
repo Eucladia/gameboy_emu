@@ -255,19 +255,19 @@ impl Hardware {
       .update_button_state(&mut self.interrupts, button, button_state);
   }
 
-  /// Steps the timer with the following number of cycles.
-  pub fn step_timer(&mut self, cycles: usize) {
-    self.timer.step(&mut self.interrupts, cycles);
+  /// Steps the timer by a T-cycle.
+  pub fn step_timer(&mut self) {
+    self.timer.step(&mut self.interrupts);
   }
 
-  /// Steps the PPU with the following number of cycles.
-  pub fn step_ppu(&mut self, cycles: usize) {
-    self.ppu.step(&mut self.interrupts, cycles);
+  /// Steps the PPU by a T-cycle.
+  pub fn step_ppu(&mut self) {
+    self.ppu.step(&mut self.interrupts);
   }
 
-  /// Steps the APU with the following number of cycles.
-  pub fn step_apu(&mut self, cycles: usize) {
-    self.apu.step(cycles);
+  /// Steps the APU by a T-cycle.
+  pub fn step_apu(&mut self) {
+    self.apu.step();
   }
 
   /// Returns the audio buffer.
