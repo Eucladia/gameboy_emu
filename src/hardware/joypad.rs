@@ -49,9 +49,11 @@ impl Joypad {
   pub fn read_register(&self) -> u8 {
     let lower_nibble = match (self.button_group >> 4) & 0x3 {
       // The action group was selected, if the 5th bit was 0
-      0b01 | 0b00 => self.pressed & 0x0F,
+      0b01 => self.pressed & 0x0F,
       // The d-pad group was selected, if the 4th bit was 0
       0b10 => (self.pressed & 0xF0) >> 4,
+      // If the 4th and 5th bits are 0, then both groups are combined
+      0b00 => (self.pressed & 0x0F) & ((self.pressed & 0xF0) >> 4),
       // No buttons selected
       _ => 0x0F,
     };
@@ -63,7 +65,7 @@ impl Joypad {
   /// Updates the [`Joypad`] button group.
   pub fn write_register(&mut self, value: u8) {
     // Only bits 4 and 5 are writeable
-    self.button_group = value & 0b11_0000;
+    self.button_group = value & 0b0011_0000;
   }
 
   /// Updates the button's state.

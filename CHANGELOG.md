@@ -14,6 +14,7 @@ and this project does not adhere to [Semantic Versioning](https://semver.org/spe
 - Basic guide.
 
 ### Fixed
+- Fixed a bug when buttons from both button groups were pressed.
 - Fix an issue with the noise channel not being able to handle all possible frequencies.
 - Implement edge case bugs when triggering sound channels' (Blargg's `dmg_sound` test 03).
 - Properly set the internal sweep enabled register on trigger (Blargg's `dmg_sound` test 04).
