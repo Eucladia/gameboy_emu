@@ -21,6 +21,8 @@ pub struct WaveChannel {
 
   wave_ram: [u8; 16],
   wave_ram_index: u8,
+  wave_buffer: u8,
+  cycles_since_wave_access: u8,
 }
 
 impl WaveChannel {
@@ -38,14 +40,23 @@ impl WaveChannel {
 
       wave_ram: [0; 16],
       wave_ram_index: 0,
+      wave_buffer: 0,
+      cycles_since_wave_access: 0,
     }
   }
 
   /// Steps the wave channel.
   pub fn step(&mut self) {
+    if self.cycles_since_wave_access > 0 {
+      self.cycles_since_wave_access -= 1;
+    }
+
     if self.frequency_timer == 0 {
       self.frequency_timer = self.frequency_timer_reload() * DOTS_MULTIPLIER;
+
       self.wave_ram_index = (self.wave_ram_index + 1) % WAVEFORM_SAMPLE_COUNT;
+      self.wave_buffer = self.wave_ram[(self.wave_ram_index >> 1) as usize];
+      self.cycles_since_wave_access = 2;
     }
 
     self.frequency_timer -= 1;
@@ -160,18 +171,31 @@ impl WaveChannel {
     self.nr34 = 0;
 
     self.enabled = false;
+    self.wave_ram_index = 0;
+    self.wave_buffer = 0;
   }
 
   /// Writes the value the channel's wave RAM at the provided address.
   pub fn write_wave_ram(&mut self, address: u16, value: u8) {
-    self.wave_ram[address as usize - 0xFF30] = value;
+    if self.enabled {
+      // On DMG, if the wave was accessed recently, then the written address is the wave index
+      if self.cycles_since_wave_access > 0 {
+        self.wave_ram[(self.wave_ram_index >> 1) as usize] = value;
+      }
+    } else {
+      self.wave_ram[address as usize - 0xFF30] = value;
+    }
   }
 
   /// Reads the channel's wave RAM from the provided address.
   pub fn read_wave_ram(&self, address: u16) -> u8 {
-    // If the channel is enabled, then the memory bus is already occupied
     if self.enabled {
-      0xFF
+      // On DMG, if the wave was accessed recently, then the current buffer is returned
+      if self.cycles_since_wave_access > 0 {
+        self.wave_buffer
+      } else {
+        0xFF
+      }
     } else {
       self.wave_ram[address as usize - 0xFF30]
     }
@@ -183,11 +207,10 @@ impl WaveChannel {
       return 0;
     }
 
-    let raw_byte = self.wave_ram[(self.wave_ram_index >> 1) as usize];
     let wave_byte = if self.wave_ram_index % 2 == 0 {
-      raw_byte >> 4
+      self.wave_buffer >> 4
     } else {
-      raw_byte & 0x0F
+      self.wave_buffer & 0x0F
     };
 
     // Adjust for the volume
@@ -217,7 +240,9 @@ impl WaveChannel {
       self.length_timer = MAX_CHANNEL_TIMER_LENGTH;
     }
 
-    self.frequency_timer = self.frequency_timer_reload() * DOTS_MULTIPLIER;
+    // NOTE: The magic constant to make tests `09` and `12` pass in `dmg_sound` is actually `2`,
+    // but since we tick all sound channels at 4 MHz, we need to multiply it by 2.
+    self.frequency_timer = self.frequency_timer_reload() * DOTS_MULTIPLIER + 4;
     self.wave_ram_index = 0;
   }
 

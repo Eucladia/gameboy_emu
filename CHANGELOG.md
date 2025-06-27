@@ -14,11 +14,10 @@ and this project does not adhere to [Semantic Versioning](https://semver.org/spe
 - Basic guide.
 
 ### Fixed
-- Implement edge case bugs when triggering sound channels', allowing us to pass 
-  Blargg's `03-trigger` test.
-- Properly set the internal sweep enabled register on trigger, allowing us to pass
-  Blargg's `04-sweep` test.
+- Implement edge case bugs when triggering sound channels' (Blargg's `dmg_sound` test 03).
+- Properly set the internal sweep enabled register on trigger (Blargg's `dmg_sound` test 04).
 - Properly clear all APU registers when disabling the APU.
+- Store the sample as a temporary buffer in the wave channel (Blargg's `dmg_sound` test 09/12).
 
 ### Changed
 - The FPS text now only displays 1 digit after the decimal, 4 digits was unnecessary.
