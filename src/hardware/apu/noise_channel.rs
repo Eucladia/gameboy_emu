@@ -12,7 +12,7 @@ pub struct NoiseChannel {
   /// The control.
   nr44: u8,
 
-  frequency_timer: u16,
+  frequency_timer: u32,
   volume: u8,
   envelope_timer: u8,
   length_timer: u8,
@@ -244,15 +244,14 @@ impl NoiseChannel {
   }
 
   /// Gets the channel's frequency.
-  fn get_frequency(&self) -> u16 {
-    let clock_shift = (self.nr43 >> 4) as u16;
-    let mut clock_divider = (self.nr43 & 0x07) as u16;
+  fn get_frequency(&self) -> u32 {
+    const DIVISORS: [u8; 8] = [8, 16, 32, 48, 64, 80, 96, 112];
 
-    if clock_divider == 0 {
-      clock_divider = 8;
-    } else {
-      clock_divider <<= 4;
-    }
+    // NOTE: We use `u32`s instead of `u16`s as with other sound channels because
+    // `u16` can't hold all possible frequencies. This causes `dmg_sound`'s `01` test
+    // to crash due to an underflow.
+    let clock_shift = (self.nr43 >> 4) as u32;
+    let clock_divider = DIVISORS[(self.nr43 & 0x07) as usize] as u32;
 
     clock_divider << clock_shift
   }
