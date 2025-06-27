@@ -19,6 +19,7 @@ and this project does not adhere to [Semantic Versioning](https://semver.org/spe
 - Properly set the internal sweep enabled register on trigger (Blargg's `dmg_sound` test 04).
 - Properly clear all APU registers when disabling the APU.
 - Store the sample as a temporary buffer in the wave channel (Blargg's `dmg_sound` test 09/12).
+- Implemented wave RAM corruption (Blargg's `dmg_sound` test 10).
 
 ### Changed
 - The FPS text now only displays 1 digit after the decimal, 4 digits was unnecessary.

@@ -234,6 +234,23 @@ impl WaveChannel {
 
   /// Triggers this channel.
   fn trigger(&mut self) {
+    // If the wave channel gets triggered 1 T-cycle before wave RAM is read, then the wave RAM
+    // gets corrupted.
+    if self.enabled && self.frequency_timer == 0 {
+      let offset = (self.wave_ram_index + 1) >> 1;
+
+      if offset < 4 {
+        self.wave_ram[0] = self.wave_ram[offset as usize];
+      } else {
+        let start = (offset & 0x0C) as usize;
+
+        self.wave_ram[0] = self.wave_ram[start];
+        self.wave_ram[1] = self.wave_ram[start + 1];
+        self.wave_ram[2] = self.wave_ram[start + 2];
+        self.wave_ram[3] = self.wave_ram[start + 3];
+      }
+    }
+
     self.enabled = self.is_dac_on();
 
     if self.length_timer == 0 {
