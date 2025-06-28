@@ -2558,9 +2558,11 @@ impl Cpu {
       // If a DMA transfer is in progress and the program counter is in high ram,
       // then the next byte being fetched is the byte that is being transferred.
       Some(&DmaTransfer::Transferring { ticks }) if self.registers.pc < HIGH_RAM_START => {
-        let index = ticks / 4;
+        let m_cycle_index = ticks / 4;
+        let starting_address = (hardware.ppu.dma as u16) << 8;
+        let index = starting_address + m_cycle_index;
 
-        hardware.read_byte(index << 8)
+        hardware.read_byte(index)
       }
       _ => hardware.read_byte(self.registers.pc),
     }
