@@ -250,6 +250,25 @@ impl Ppu {
     is_flag_set!(self.lcdc, LcdControl::LcdDisplay as u8)
   }
 
+  /// Returns whether the PPU can access OAM.
+  pub fn can_access_oam(&self) -> bool {
+    // TODO: The PPU can be blocked from OAM during DMA transfers as well
+
+    // The PPU can only read from OAM if the LCD is off or the PPU is not in
+    // `OamScan` and not in `PixelTransfer`.
+    !self.display_enabled()
+      || !matches!(
+        self.current_mode(),
+        PpuMode::OamScan | PpuMode::PixelTransfer
+      )
+  }
+
+  /// Returns whether the PPU can access VRAM.
+  pub fn can_access_vram(&self) -> bool {
+    // The PPU can only read VRAM if the LCD is off or the PPU is not in pixel transfer.
+    !self.display_enabled() || !matches!(self.current_mode(), PpuMode::PixelTransfer)
+  }
+
   /// Gets the frame buffer.
   pub fn buffer(&self) -> &[[u8; 160]; 144] {
     &self.buffer

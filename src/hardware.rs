@@ -21,7 +21,7 @@ use crate::{
     apu::{Apu, AudioSample},
     cartridge::{Cartridge, Mbc1, RomOnly},
     joypad::{Button, ButtonAction},
-    ppu::{DmaTransfer, Ppu, PpuMode},
+    ppu::{DmaTransfer, Ppu},
   },
   interrupts::{Interrupt, Interrupts},
 };
@@ -76,11 +76,7 @@ impl Hardware {
       0x4000..0x8000 => self.cartridge.read_rom(address),
       // Video RAM
       0x8000..0xA000 => {
-        // VRAM is only accessible if the LCD is off or the PPU is not in pixel transfer
-        //
-        // See https://gbdev.io/pandocs/Accessing_VRAM_and_OAM.html for more.
-        if !self.ppu.display_enabled() || !matches!(self.ppu.current_mode(), PpuMode::PixelTransfer)
-        {
+        if self.ppu.can_access_vram() {
           self.ppu.read_ram(address)
         } else {
           0xFF
@@ -94,19 +90,14 @@ impl Hardware {
       0xE000..0xFE00 => self.memory[(address - 0xE000) as usize],
       // OAM
       0xFE00..0xFEA0 => {
-        // OAM is only accessible if the LCD is off or the PPU is not in OAM scan
-        // and not pixel transfer modes
-        //
-        // See https://gbdev.io/pandocs/Accessing_VRAM_and_OAM.html for more.
-        if !self.ppu.display_enabled()
-          || !matches!(
-            self.ppu.current_mode(),
-            PpuMode::OamScan | PpuMode::PixelTransfer
-          )
-        {
-          self.ppu.read_oam(address)
-        } else {
+        let ppu_blocked = !self.ppu.can_access_oam();
+        // OAM is also blocked if there's a running DMA transfer
+        let dma_blocked = self.dma_transfer_running();
+
+        if dma_blocked || ppu_blocked {
           0xFF
+        } else {
+          self.ppu.read_oam(address)
         }
       }
       // Unused
@@ -130,11 +121,7 @@ impl Hardware {
       0x4000..0x8000 => self.cartridge.write_rom(address, value),
       // Video RAM
       0x8000..0xA000 => {
-        // VRAM is only accessible when the LCD is off or the PPU is not in pixel transfer.
-        //
-        // See https://gbdev.io/pandocs/Accessing_VRAM_and_OAM.html for more.
-        if !self.ppu.display_enabled() || !matches!(self.ppu.current_mode(), PpuMode::PixelTransfer)
-        {
+        if self.ppu.can_access_vram() {
           self.ppu.write_ram(address, value)
         }
       }
@@ -146,16 +133,11 @@ impl Hardware {
       0xE000..0xFE00 => self.memory[(address - 0xE000) as usize] = value,
       // OAM
       0xFE00..0xFEA0 => {
-        // OAM is only accessible when the LCD is off or the PPU is not in pixel transfer
-        // and not in OAM scan.
-        //
-        // See https://gbdev.io/pandocs/Accessing_VRAM_and_OAM.html for more.
-        if !self.ppu.display_enabled()
-          || !matches!(
-            self.ppu.current_mode(),
-            PpuMode::OamScan | PpuMode::PixelTransfer
-          )
-        {
+        let ppu_blocked = !self.ppu.can_access_oam();
+        // OAM is also blocked if there's a running DMA transfer
+        let dma_blocked = self.dma_transfer_running();
+
+        if !dma_blocked && !ppu_blocked {
           self.ppu.write_oam(address, value)
         }
       }
@@ -188,28 +170,31 @@ impl Hardware {
         }
       }
       Some(DmaTransfer::Transferring { ticks }) => {
-        const CLOCKS_PER_TRANSFER: u16 = 4;
+        const CYCLES_PER_TRANSFER: u16 = 4;
         const DMA_TRANSFER_MAX_BYTES: u16 = 160;
-        const DMA_TRANSFER_DURATION: u16 = DMA_TRANSFER_MAX_BYTES * CLOCKS_PER_TRANSFER;
+        const DMA_TRANSFER_DURATION: u16 = DMA_TRANSFER_MAX_BYTES * CYCLES_PER_TRANSFER;
+
+        // Check for this at the start, otherwise we would end the DMA transfer 1 M-cycle
+        // before it should actually be over. This is important to pass `oam_dma_timing`.
+        if ticks == DMA_TRANSFER_DURATION {
+          self.ppu.dma_transfer = None;
+
+          return;
+        }
 
         let new_ticks = ticks + 1;
 
         // An M-cycle has occured, so transfer a byte
-        if new_ticks % CLOCKS_PER_TRANSFER == 0 {
+        if new_ticks % CYCLES_PER_TRANSFER == 0 {
           let starting_address = (self.ppu.dma as u16) << 8;
-          let index = ticks / CLOCKS_PER_TRANSFER;
+          let index = ticks / CYCLES_PER_TRANSFER;
           let src_byte = self.read_byte(starting_address + index);
 
           // Use `Ppu::write_oam` because Hardware::write_byte` checks for active DMA transfers.
           self.ppu.write_oam(0xFE00 + index, src_byte);
         }
 
-        // Subtract 4 because we pre-emptively increment the ticks
-        if new_ticks == DMA_TRANSFER_DURATION - CLOCKS_PER_TRANSFER {
-          self.ppu.dma_transfer = None;
-        } else {
-          self.ppu.dma_transfer = Some(DmaTransfer::Transferring { ticks: new_ticks });
-        }
+        self.ppu.dma_transfer = Some(DmaTransfer::Transferring { ticks: new_ticks });
       }
       None => {}
     }
@@ -243,9 +228,17 @@ impl Hardware {
     }
   }
 
-  /// Returns whether there is an active DMA transfer.
-  pub fn dma_transfer_running(&self) -> bool {
+  /// Returns whether there is a requested or active DMA transfer.
+  pub fn dma_transfer_exists(&self) -> bool {
     self.ppu.dma_transfer.is_some()
+  }
+
+  /// Returns whether there is a running DMA transfer that is transferring bytes.
+  pub fn dma_transfer_running(&self) -> bool {
+    matches!(
+      self.ppu.dma_transfer,
+      Some(DmaTransfer::Transferring { .. })
+    )
   }
 
   /// Updates the joypad's button state for the [`Button`].
