@@ -150,12 +150,19 @@ impl Cpu {
           CpuState::Running => self.step_instruction(hardware),
           CpuState::HandlingInterrupts => self.handle_interrupts(hardware),
           CpuState::Halted => {
-            // If the CPU is halted and we're in `CpuState::Halted` instead of
-            // `CpuState::HandlingInterrupts`, then that means that the IME is set
-            // to false. Since this is the case, exit out of the halted state since
-            // it's been 4 T-cycles since the CPU was halted, by now.
             if hardware.has_pending_interrupts() {
-              self.state = CpuState::Running;
+              // If the CPU was successfully halted and there weren't any immediate
+              // interrupts following the completion of the `HALT` instruction, and
+              // we now have some pending interrupts, then we should start handling
+              // interrupts if the IME is set.
+              //
+              // If the IME is not set, then we should exit out of the halted state,
+              // since it should have been 4 T-cycles by now and we have pending interrupts.
+              if self.interrupt_master_enabled {
+                self.should_handle_interrupts = true;
+              } else {
+                self.state = CpuState::Running;
+              }
             }
           }
           CpuState::Stopped => {}
