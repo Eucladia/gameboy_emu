@@ -116,33 +116,47 @@ impl Apu {
     let apu_enabled = self.is_enabled();
 
     match address {
-      // Sound channel 1
+      // Sound channel 1 - Pulse sweep channel
       0xFF10..0xFF15 => {
-        self
-          .channel1
-          .write_register(apu_enabled, address, value, self.frame_sequencer_step)
+        if apu_enabled || address == 0xFF11 {
+          // We need to mask out some of upper nibble if the APU isn't enabled.
+          let actual_value = if apu_enabled { value } else { value & 0x3F };
+
+          self
+            .channel1
+            .write_register(address, actual_value, self.frame_sequencer_step)
+        }
       }
       // Undocumented
       0xFF15 => {}
-      // Sound channel 2
+      // Sound channel 2 - Pulse channel
       0xFF16..0xFF1A => {
-        self
-          .channel2
-          .write_register(apu_enabled, address, value, self.frame_sequencer_step)
+        if apu_enabled || address == 0xFF16 {
+          // We need to mask out some of upper nibble if the APU isn't enabled.
+          let actual_value = if apu_enabled { value } else { value & 0x3F };
+
+          self
+            .channel2
+            .write_register(address, actual_value, self.frame_sequencer_step)
+        }
       }
-      // Sound channel 3
+      // Sound channel 3 - Wave channel
       0xFF1A..0xFF1F => {
-        self
-          .channel3
-          .write_register(apu_enabled, address, value, self.frame_sequencer_step)
+        if apu_enabled || address == 0xFF1B {
+          self
+            .channel3
+            .write_register(address, value, self.frame_sequencer_step)
+        }
       }
       // Undocumented
       0xFF1F => {}
-      // Sound channel 4
+      // Sound channel 4 - Noise channel
       0xFF20..0xFF24 => {
-        self
-          .channel4
-          .write_register(apu_enabled, address, value, self.frame_sequencer_step)
+        if apu_enabled || address == 0xFF20 {
+          self
+            .channel4
+            .write_register(address, value, self.frame_sequencer_step)
+        }
       }
 
       // Global registers

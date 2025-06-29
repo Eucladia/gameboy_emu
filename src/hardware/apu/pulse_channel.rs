@@ -111,19 +111,12 @@ impl PulseChannel {
   }
 
   /// Writes to the channel's registers.
-  pub fn write_register(&mut self, apu_enabled: bool, address: u16, value: u8, frame_step: u8) {
+  pub fn write_register(&mut self, address: u16, value: u8, frame_step: u8) {
     let lower_byte = address & 0xFF;
-
-    // Writes aren't allowed when the APU is turned off, unless we're writing to the
-    // length counter.
-    if !apu_enabled && lower_byte != 0x16 {
-      return;
-    }
 
     match lower_byte {
       0x16 => {
-        // If the APU is disabled, then ONLY read the length bits
-        self.nr21 = if apu_enabled { value } else { value & 0x3F };
+        self.nr21 = value;
         self.reload_length_timer();
       }
       0x17 => {

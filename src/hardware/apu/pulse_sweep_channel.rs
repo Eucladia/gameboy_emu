@@ -143,14 +143,8 @@ impl PulseSweepChannel {
   }
 
   /// Writes to the channel's registers.
-  pub fn write_register(&mut self, apu_enabled: bool, address: u16, value: u8, frame_step: u8) {
+  pub fn write_register(&mut self, address: u16, value: u8, frame_step: u8) {
     let lower_byte = address & 0xFF;
-
-    // Writes aren't allowed when the APU is turned off, unless we're writing to the
-    // length counter.
-    if !apu_enabled && lower_byte != 0x11 {
-      return;
-    }
 
     match lower_byte {
       0x10 => {
@@ -166,8 +160,7 @@ impl PulseSweepChannel {
         self.nr10 = value;
       }
       0x11 => {
-        // If the APU is disabled, then ONLY read the length bits
-        self.nr11 = if apu_enabled { value } else { value & 0x3F };
+        self.nr11 = value;
         self.reload_length_timer();
       }
       0x12 => {
