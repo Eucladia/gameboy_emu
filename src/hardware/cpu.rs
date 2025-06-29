@@ -147,7 +147,7 @@ impl Cpu {
 
         match self.state {
           CpuState::Running => self.step_instruction(hardware),
-          CpuState::HandlingInterrupts => self.handle_interrupts(hardware),
+          CpuState::HandlingInterrupts => self.step_interrupts(hardware),
           CpuState::Halted => {
             if hardware.has_pending_interrupts() {
               // If the CPU was successfully halted and there weren't any immediate
@@ -2488,8 +2488,8 @@ impl Cpu {
     }
   }
 
-  /// Handles any of the currently requested interrupts.
-  pub fn handle_interrupts(&mut self, hardware: &mut Hardware) {
+  /// Steps 1 M-cycle of handling interrupts.
+  pub fn step_interrupts(&mut self, hardware: &mut Hardware) {
     use CpuCycle::*;
 
     if matches!(self.cycle, M1) {
