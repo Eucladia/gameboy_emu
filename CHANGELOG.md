@@ -20,7 +20,7 @@ and this project does not adhere to [Semantic Versioning](https://semver.org/spe
   in high RAM.
 - Implemented OAM DMA blocking (Mooneye's `oam_dma_timing`).
 - Fixed a bug where erroneous instructions would be executed when halted (Mooneye's `di_timing-GS`,
-  `ei_timing`, `halt_ime0_ei`, `halt_ime0_nointr_timing`, `halt_ime1_timing`, `halt_ime1_timging2-GS`,
+  `ei_timing`, `halt_ime0_ei`, `halt_ime0_nointr_timing`, `halt_ime1_timing`, `halt_ime1_timing2-GS`,
   `rapid_di_ei`).
 - Fixed a bug when buttons from both button groups were pressed.
 - Fix an issue with the noise channel not being able to handle all possible frequencies.
