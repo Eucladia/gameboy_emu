@@ -294,8 +294,7 @@ impl Hardware {
 
   /// Checks if the following interrupt has been requested.
   pub fn is_interrupt_requested(&self, interrupt: Interrupt) -> bool {
-    is_flag_set!(self.interrupts.enabled_bitfield(), interrupt as u8)
-      && is_flag_set!(self.interrupts.requested_bitfield(), interrupt as u8)
+    self.interrupts.is_enabled(interrupt) && self.interrupts.is_requested(interrupt)
   }
 
   /// Clears a requested [`Interrupt`].

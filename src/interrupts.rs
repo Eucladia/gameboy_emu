@@ -29,19 +29,9 @@ impl Interrupts {
     }
   }
 
-  /// Enables the [`Interrupt`].
-  pub fn enable_interrupt(&mut self, interrupt: Interrupt) {
-    add_flag!(&mut self.enabled, interrupt as u8);
-  }
-
-  /// Disables the [`Interrupt`].
-  pub fn disable_interrupt(&mut self, interrupt: Interrupt) {
-    remove_flag!(&mut self.enabled, interrupt as u8);
-  }
-
   /// Checks if the [`Interrupt`] is enabled.
-  pub fn is_enabled(&mut self, interrupt: Interrupt) -> bool {
-    is_flag_set!(self.enabled, interrupt as u8)
+  pub fn is_enabled(&self, interrupt: Interrupt) -> bool {
+    is_flag_set!(self.enabled_bitfield(), interrupt as u8)
   }
 
   /// Sets the internal enabled interrupts to the following value.
@@ -55,8 +45,8 @@ impl Interrupts {
   }
 
   /// Checks if the following [`Interrupt`] was requested.
-  pub fn is_requested(&mut self, interrupt: Interrupt) -> bool {
-    is_flag_set!(self.requested, interrupt as u8)
+  pub fn is_requested(&self, interrupt: Interrupt) -> bool {
+    is_flag_set!(self.requested_bitfield(), interrupt as u8)
   }
 
   /// Requests the following [`Interrupt`].
