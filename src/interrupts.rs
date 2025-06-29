@@ -36,12 +36,13 @@ impl Interrupts {
 
   /// Sets the internal enabled interrupts to the following value.
   pub fn set_enabled(&mut self, value: u8) {
-    self.enabled = value & 0b0001_1111
+    // All 8 bits of IE are read/write
+    self.enabled = value
   }
 
   /// Returns a bitfield of the enabled interrupts.
   pub fn enabled_bitfield(&self) -> u8 {
-    self.enabled & 0b0001_1111
+    self.enabled
   }
 
   /// Checks if the following [`Interrupt`] was requested.
@@ -56,6 +57,7 @@ impl Interrupts {
 
   /// Sets the requested interrupts to the following value.
   pub fn set_requested(&mut self, value: u8) {
+    // Only the lower 5 bits of IF are read/write
     self.requested = value & 0b0001_1111;
   }
 
@@ -66,6 +68,7 @@ impl Interrupts {
 
   /// Returns a bitfield of the requested interrupts.
   pub fn requested_bitfield(&self) -> u8 {
-    self.requested & 0b0001_1111
+    // The upper 3 bits of IF return are set when reading
+    self.requested | 0b1110_0000
   }
 }
