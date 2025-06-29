@@ -560,10 +560,10 @@ const fn get_character_bitmap(byte: u8) -> Option<[u8; DEFAULT_CHARACTER_HEIGHT 
 /// Converts a winit key into a Gameboy button.
 fn convert_button(physical_key: &PhysicalKey) -> Option<Button> {
   Some(match physical_key {
-    PhysicalKey::Code(KeyCode::KeyW) => Button::Up,
-    PhysicalKey::Code(KeyCode::KeyS) => Button::Down,
-    PhysicalKey::Code(KeyCode::KeyA) => Button::Left,
-    PhysicalKey::Code(KeyCode::KeyD) => Button::Right,
+    PhysicalKey::Code(KeyCode::KeyW | KeyCode::ArrowUp) => Button::Up,
+    PhysicalKey::Code(KeyCode::KeyS | KeyCode::ArrowDown) => Button::Down,
+    PhysicalKey::Code(KeyCode::KeyA | KeyCode::ArrowLeft) => Button::Left,
+    PhysicalKey::Code(KeyCode::KeyD | KeyCode::ArrowRight) => Button::Right,
 
     PhysicalKey::Code(KeyCode::KeyZ) => Button::A,
     PhysicalKey::Code(KeyCode::KeyX) => Button::B,

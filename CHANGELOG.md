@@ -12,6 +12,7 @@ and this project does not adhere to [Semantic Versioning](https://semver.org/spe
 - Support for incrementing and decrementing the master volume via `Shift` + `+` / `-`.
 - Toggleable volume overlay when pressing `Shift` + `1`.
 - Basic guide.
+- Add directional arrow key support.
 
 ### Fixed
 - Fixed stacked OAM DMA transfers (Mooneye's `oam_dma_restart`, `oam_dma_start`).
