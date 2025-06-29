@@ -15,6 +15,8 @@ and this project does not adhere to [Semantic Versioning](https://semver.org/spe
 - Add directional arrow key support.
 
 ### Fixed
+- Fixed interrupt handling when `IE` or `IF` registers get changed during
+  dispatch (Mooneye's `ie_push`).
 - Fixed the read/write for the bits of IE and IF registers (Mooneye's `if_ie_registers`).
 - Fixed stacked OAM DMA transfers (Mooneye's `oam_dma_restart`, `oam_dma_start`).
 - Properly fetch the byte being transferred by a DMA transfer in the CPU when the PC isn't 

@@ -2510,33 +2510,58 @@ impl Cpu {
 
       self.cycle = M4;
     } else if matches!(self.cycle, M4) {
+      // The vector address for when there is no longer an interrupt to handle.
+      const INTERRUPT_CANCELLATION_VECTOR: u16 = 0x0000;
+
       let pc_low = (self.registers.pc & 0x00FF) as u8;
 
+      // Keep track of the pending interrupt before the call to write to the stack because
+      // that can overwrite the `IE` and `IF` registers, thus potentially changing the next
+      // interrupt that should be handled.
+      let prev_interrupt = hardware.next_pending_interrupt();
+
+      // Write the lower byte of the PC to the stack
       hardware.write_byte(self.registers.sp, pc_low);
 
-      // Interrupts with a smaller bit value have higher priority.
+      // Check *again* for the next interrupt. This can differ from the previous interrupt
+      // if the write to the stack changed the `IE` or `IF` registers.
+      let curr_interrupt = hardware.next_pending_interrupt();
+
+      // There are 4 cases that to consider when handling interrupts in a cycle-accurate manner:
       //
-      // The master interrupt is disabled before calling the handler of the interrupt.
+      // 1) There was no previous interrupt and now there is one. If so, handle the newer one.
+      //    This happens when the `IE`/`IF` registers got changed when writing the upper byte
+      //    of the PC to the stack.
       //
-      // See https://gbdev.io/pandocs/Interrupts.html for more.
-      if hardware.is_interrupt_requested(Interrupt::VBlank) {
-        self.registers.pc = 0x0040;
-        hardware.clear_interrupt(Interrupt::VBlank);
-      } else if hardware.is_interrupt_requested(Interrupt::Lcd) {
-        self.registers.pc = 0x0048;
-        hardware.clear_interrupt(Interrupt::Lcd);
-      } else if hardware.is_interrupt_requested(Interrupt::Timer) {
-        self.registers.pc = 0x0050;
-        hardware.clear_interrupt(Interrupt::Timer);
-      } else if hardware.is_interrupt_requested(Interrupt::Serial) {
-        self.registers.pc = 0x0058;
-        hardware.clear_interrupt(Interrupt::Serial);
-      } else if hardware.is_interrupt_requested(Interrupt::Joypad) {
-        self.registers.pc = 0x0060;
-        hardware.clear_interrupt(Interrupt::Joypad);
-      } else {
-        // TODO: This may be wrong for cycle accuracy edge cases
-        debug_assert!(false, "no pending interrupt");
+      // 2) There was a previous interrupt, but none now. If so, handle the older one.
+      //    This happens when the `IE`/`IF` registers got changed when writing the lower byte
+      //    of the PC to the stack.
+      //
+      // 3) There was a previous interrupt and there is a new interrupt. If so, get the
+      //    interrupt with higher priority.
+      //    This can occur when interrupts get enabled or disabled when writing the
+      //    lower byte of the PC to the stack, so we need to make sure that we handle
+      //    the interrupt with the highest priority.
+      //
+      // 4) There was no previous interrupt and there still is none. If so, go to the
+      //    cancellation vector, which is 0x0000.
+      //    This occurs when the `IE`/`IF` registers got changed when writing the upper byte
+      //    of the PC to the stack.
+      let interrupt = match (prev_interrupt, curr_interrupt) {
+        (None, Some(new)) => Some(new),
+        (Some(old), None) => Some(old),
+        // NOTE: I could implement `Ord` for `Interrupt` and get rid of this. In fact,
+        // this ENTIRE match could be removed, but I prefer this way since it's more explicit
+        // and the cases can be seen more clearly.
+        (Some(old), Some(new)) => Some(Interrupt::prioritize(old, new)),
+        (None, None) => None,
+      };
+
+      self.registers.pc = interrupt.map_or(INTERRUPT_CANCELLATION_VECTOR, Interrupt::to_vector);
+
+      // Make sure we mark the interrupt as handled in the IF register.
+      if let Some(interrupt) = interrupt {
+        hardware.clear_interrupt(interrupt);
       }
 
       self.interrupt_master_enabled = false;

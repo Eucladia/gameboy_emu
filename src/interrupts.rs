@@ -1,4 +1,4 @@
-use crate::flags::{add_flag, is_flag_set, remove_flag};
+use crate::flags::{add_flag, remove_flag};
 
 /// A kind of interrupt.
 #[derive(Debug, Copy, Clone)]
@@ -11,12 +11,12 @@ pub enum Interrupt {
   Joypad = 1 << 4,
 }
 
-/// Stores the currently enabled interrupts and currently set interrupts.
+/// Stores the enabled interrupts and pending interrupts.
 #[derive(Debug, Clone)]
 pub struct Interrupts {
-  /// The currently requested interrupts.
+  /// The `IF` register, which is the currently pending interrupts.
   requested: u8,
-  /// The currently enabled interrupts.
+  /// The `IE` register, which is the currently enabled interrupts.
   enabled: u8,
 }
 
@@ -29,11 +29,6 @@ impl Interrupts {
     }
   }
 
-  /// Checks if the [`Interrupt`] is enabled.
-  pub fn is_enabled(&self, interrupt: Interrupt) -> bool {
-    is_flag_set!(self.enabled_bitfield(), interrupt as u8)
-  }
-
   /// Sets the internal enabled interrupts to the following value.
   pub fn set_enabled(&mut self, value: u8) {
     // All 8 bits of IE are read/write
@@ -41,13 +36,8 @@ impl Interrupts {
   }
 
   /// Returns a bitfield of the enabled interrupts.
-  pub fn enabled_bitfield(&self) -> u8 {
+  pub const fn enabled_bitfield(&self) -> u8 {
     self.enabled
-  }
-
-  /// Checks if the following [`Interrupt`] was requested.
-  pub fn is_requested(&self, interrupt: Interrupt) -> bool {
-    is_flag_set!(self.requested_bitfield(), interrupt as u8)
   }
 
   /// Requests the following [`Interrupt`].
@@ -67,8 +57,26 @@ impl Interrupts {
   }
 
   /// Returns a bitfield of the requested interrupts.
-  pub fn requested_bitfield(&self) -> u8 {
+  pub const fn requested_bitfield(&self) -> u8 {
     // The upper 3 bits of IF return are set when reading
     self.requested | 0b1110_0000
+  }
+}
+
+impl Interrupt {
+  /// Converts the [`Interrupt`] to its vector address.
+  pub const fn to_vector(self) -> u16 {
+    const BASE_INTERRUPT_ADDRESS: u16 = 0x0040;
+    const INTERRUPT_OFFSET: u16 = 0x08;
+
+    let leading_zeros = (self as u8).trailing_zeros() as u16;
+
+    BASE_INTERRUPT_ADDRESS + leading_zeros * INTERRUPT_OFFSET
+  }
+
+  /// Returns the [`Interrupt`] of higher priority.
+  pub const fn prioritize(lhs: Interrupt, rhs: Interrupt) -> Interrupt {
+    // Interrupts with lower bit values have higher priority
+    if (lhs as u8) < (rhs as u8) { lhs } else { rhs }
   }
 }
