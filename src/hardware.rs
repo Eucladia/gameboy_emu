@@ -303,11 +303,6 @@ impl Hardware {
     self.interrupts.clear_interrupt(interrupt);
   }
 
-  /// Gets the active DMA transfer.
-  pub fn get_dma_transfer(&self) -> Option<&DmaTransfer> {
-    self.ppu.dma_transfer.as_ref()
-  }
-
   /// Gets the frame buffer from the PPU.
   pub fn frame_buffer(&self) -> &[[u8; 160]; 144] {
     self.ppu.buffer()

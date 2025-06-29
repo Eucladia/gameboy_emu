@@ -634,17 +634,10 @@ pub enum StatFlag {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
 pub enum PpuMode {
-  HBlank = 0b00,
-  VBlank = 0b01,
-  OamScan = 0b10,
-  PixelTransfer = 0b11,
-}
-
-impl PpuMode {
-  /// Converts the 2-bit value into a [`PpuMode`].
-  pub fn from_bits(bits: u8) -> Option<PpuMode> {
-    Self::try_from(bits).ok()
-  }
+  HBlank = 0,
+  VBlank = 1,
+  OamScan = 2,
+  PixelTransfer = 3,
 }
 
 /// Attributes that sprites can have.
