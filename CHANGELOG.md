@@ -14,6 +14,7 @@ and this project does not adhere to [Semantic Versioning](https://semver.org/spe
 - Basic guide.
 
 ### Fixed
+- Fixed stacked OAM DMA transfers (Mooneye's `oam_dma_restart`, `oam_dma_start`).
 - Properly fetch the byte being transferred by a DMA transfer in the CPU when the PC isn't 
   in high RAM.
 - Implemented OAM DMA blocking (Mooneye's `oam_dma_timing`).

@@ -45,20 +45,38 @@ pub struct Ppu {
   counter: usize,
 
   /// The last value set when executing a DMA transfer,
-  pub dma: u8,
+  dma: u8,
   /// The current DMA transfer.
   pub dma_transfer: Option<DmaTransfer>,
+  /// A restarted DMA transfer.
+  pub restarted_dma_transfer: Option<RestartedDmaTransfer>,
 }
 
 /// The state of a direct memory transfer.
 #[derive(Debug, Clone)]
-pub enum DmaTransfer {
-  /// A DMA transfer was requested.
-  Requested,
-  /// A DMA transfer is going to begin, once 4 T-cycles have elapsed.
-  Starting { ticks: u8 },
+pub struct DmaTransfer {
+  /// The source address of where to copy from, for this the DMA transfer.
+  pub source: u8,
+  /// The progress of the DMA transfer.
+  pub progress: DmaTransferProgress,
+}
+
+/// The progress of an existing DMA transfer.
+#[derive(Debug, Clone)]
+pub enum DmaTransferProgress {
+  /// A DMA transfer was requested and is going to begin after an M-cycle has elapsed.
+  Requested { delay_ticks: u8 },
   /// A DMA transfer that is in progress with the following dots.
   Transferring { ticks: u16 },
+}
+
+/// A DMA transfer when one is already running.
+#[derive(Debug, Clone)]
+pub struct RestartedDmaTransfer {
+  /// The source address of where to copy from, for this the DMA transfer.
+  pub source: u8,
+  /// The number of T-cycles since this restarted DMA transfer was requested.
+  pub delay_ticks: u8,
 }
 
 impl Ppu {
@@ -83,6 +101,7 @@ impl Ppu {
 
       dma: 0,
       dma_transfer: None,
+      restarted_dma_transfer: None,
 
       memory: [0; VIDEO_RAM_SIZE as usize],
       oam: [0; OAM_SIZE as usize],
@@ -209,7 +228,12 @@ impl Ppu {
       0xFF45 => self.lyc = value,
       0xFF46 => {
         self.dma = value;
-        self.dma_transfer = Some(DmaTransfer::Requested);
+
+        if self.dma_transfer.is_some() {
+          self.restarted_dma_transfer = Some(RestartedDmaTransfer::new(self.dma));
+        } else {
+          self.dma_transfer = Some(DmaTransfer::new(self.dma));
+        }
       }
       0xFF47 => self.bgp = value,
       0xFF48 => self.obp0 = value,
@@ -527,6 +551,34 @@ impl Ppu {
         // Map the raw sprite color using the selected palette.
         *pixel = (palette >> (color * 2)) & 0x03;
       }
+    }
+  }
+}
+
+impl DmaTransfer {
+  /// Creates a requested DMA transfer, with the following source address.
+  pub fn new(source: u8) -> Self {
+    Self {
+      source,
+      progress: DmaTransferProgress::Requested { delay_ticks: 0 },
+    }
+  }
+
+  /// Creates a started DMA transfer, with the following source address.
+  pub fn starting(source: u8) -> Self {
+    Self {
+      source,
+      progress: DmaTransferProgress::Transferring { ticks: 0 },
+    }
+  }
+}
+
+impl RestartedDmaTransfer {
+  /// Creates a new restarted DMA transfer, with the following source address.
+  pub fn new(source: u8) -> Self {
+    Self {
+      source,
+      delay_ticks: 0,
     }
   }
 }

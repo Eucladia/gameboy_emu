@@ -2,7 +2,6 @@ use crate::{
   flags::{ConditionalFlag, Flag, add_flag, is_flag_set, remove_flag},
   hardware::{
     Hardware,
-    ppu::DmaTransfer,
     registers::{self, Registers},
   },
   interrupts::Interrupt,
@@ -2550,27 +2549,9 @@ impl Cpu {
     }
   }
 
-  /// Returns the current byte.
-  pub fn current_byte(&self, hardware: &Hardware) -> u8 {
-    const HIGH_RAM_START: u16 = 0xFF80;
-
-    match hardware.get_dma_transfer() {
-      // If a DMA transfer is in progress and the program counter is in high ram,
-      // then the next byte being fetched is the byte that is being transferred.
-      Some(&DmaTransfer::Transferring { ticks }) if self.registers.pc < HIGH_RAM_START => {
-        let m_cycle_index = ticks / 4;
-        let starting_address = (hardware.ppu.dma as u16) << 8;
-        let index = starting_address + m_cycle_index;
-
-        hardware.read_byte(index)
-      }
-      _ => hardware.read_byte(self.registers.pc),
-    }
-  }
-
   /// Fetches the next byte.
   pub fn fetch_byte(&mut self, hardware: &Hardware) -> u8 {
-    let byte = self.current_byte(hardware);
+    let byte = hardware.read_byte(self.registers.pc);
 
     // The program counter shouldn't be incremented when we're in a bugged halt state.
     if self.halt_bug {
