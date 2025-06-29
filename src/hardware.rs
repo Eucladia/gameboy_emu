@@ -168,17 +168,9 @@ impl Hardware {
             let new_ticks = ticks + 1;
 
             if new_ticks == DMA_TRANSFER_DELAY {
-              self.ppu.dma_transfer = Some(DmaTransfer {
-                source,
-                progress: DmaTransferProgress::Transferring { ticks: 0 },
-              });
+              self.ppu.dma_transfer = Some(DmaTransfer::starting(source));
             } else {
-              self.ppu.dma_transfer = Some(DmaTransfer {
-                source,
-                progress: DmaTransferProgress::Requested {
-                  delay_ticks: new_ticks,
-                },
-              })
+              self.ppu.dma_transfer = Some(DmaTransfer::requested_with_ticks(source, new_ticks));
             }
           }
           &DmaTransferProgress::Transferring { ticks } => {
@@ -206,16 +198,14 @@ impl Hardware {
               self.ppu.write_oam(0xFE00 + index, src_byte);
             }
 
-            self.ppu.dma_transfer = Some(DmaTransfer {
-              source,
-              progress: { DmaTransferProgress::Transferring { ticks: new_ticks } },
-            })
+            self.ppu.dma_transfer = Some(DmaTransfer::starting_with_ticks(source, new_ticks))
           }
         }
       }
       None => {}
     }
 
+    // Restarted DMA transfers overwrite the previous one 4 T-cycles after requested.
     if let Some(restarted_dma) = &mut self.ppu.restarted_dma_transfer {
       restarted_dma.delay_ticks += 1;
 

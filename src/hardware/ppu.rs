@@ -564,11 +564,27 @@ impl DmaTransfer {
     }
   }
 
+  /// Creates a requested DMA transfer with the following ticks.
+  pub fn requested_with_ticks(source: u8, ticks: u8) -> Self {
+    Self {
+      source,
+      progress: DmaTransferProgress::Requested { delay_ticks: ticks },
+    }
+  }
+
   /// Creates a started DMA transfer, with the following source address.
   pub fn starting(source: u8) -> Self {
     Self {
       source,
       progress: DmaTransferProgress::Transferring { ticks: 0 },
+    }
+  }
+
+  /// Creates a started DMA transfer, with the following ticks.
+  pub fn starting_with_ticks(source: u8, ticks: u16) -> Self {
+    Self {
+      source,
+      progress: DmaTransferProgress::Transferring { ticks },
     }
   }
 }
