@@ -16,7 +16,6 @@ pub use joypad::Joypad;
 pub use timer::Timer;
 
 use crate::{
-  flags::is_flag_set,
   hardware::{
     apu::{Apu, AudioSample},
     cartridge::{Cartridge, Mbc1, RomOnly},
@@ -92,7 +91,7 @@ impl Hardware {
       0xFE00..0xFEA0 => {
         let ppu_blocked = !self.ppu.can_access_oam();
         // OAM is also blocked if there's a running DMA transfer
-        let dma_blocked = self.dma_transfer_running();
+        let dma_blocked = self.ppu.dma_transfer_running();
 
         if dma_blocked || ppu_blocked {
           0xFF
@@ -135,7 +134,7 @@ impl Hardware {
       0xFE00..0xFEA0 => {
         let ppu_blocked = !self.ppu.can_access_oam();
         // OAM is also blocked if there's a running DMA transfer
-        let dma_blocked = self.dma_transfer_running();
+        let dma_blocked = self.ppu.dma_transfer_running();
 
         if !dma_blocked && !ppu_blocked {
           self.ppu.write_oam(address, value)
@@ -244,22 +243,6 @@ impl Hardware {
     }
   }
 
-  /// Returns whether there is a DMA transfer.
-  pub fn dma_transfer_exists(&self) -> bool {
-    self.ppu.dma_transfer.is_some()
-  }
-
-  /// Returns whether there is a running DMA transfer, that is transferring bytes.
-  pub fn dma_transfer_running(&self) -> bool {
-    matches!(
-      self.ppu.dma_transfer,
-      Some(DmaTransfer {
-        progress: DmaTransferProgress::Transferring { .. },
-        ..
-      })
-    )
-  }
-
   /// Updates the joypad's button state for the [`Button`].
   pub fn update_button(&mut self, button: Button, button_state: ButtonAction) {
     self
@@ -287,6 +270,11 @@ impl Hardware {
     self.apu.audio_buffer()
   }
 
+  /// Gets the frame buffer from the PPU.
+  pub fn frame_buffer(&self) -> &[[u8; 160]; 144] {
+    self.ppu.buffer()
+  }
+
   /// Checks if there are any pending interrupts.
   pub fn has_pending_interrupts(&self) -> bool {
     (self.interrupts.enabled_bitfield() & self.interrupts.requested_bitfield()) != 0
@@ -300,11 +288,6 @@ impl Hardware {
   /// Clears a requested [`Interrupt`].
   pub fn clear_interrupt(&mut self, interrupt: Interrupt) {
     self.interrupts.clear_interrupt(interrupt);
-  }
-
-  /// Gets the frame buffer from the PPU.
-  pub fn frame_buffer(&self) -> &[[u8; 160]; 144] {
-    self.ppu.buffer()
   }
 }
 

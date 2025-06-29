@@ -274,10 +274,8 @@ impl Ppu {
     is_flag_set!(self.lcdc, LcdControl::LcdDisplay as u8)
   }
 
-  /// Returns whether the PPU can access OAM.
+  /// Returns whether the OAM can be accessed by the CPU.
   pub fn can_access_oam(&self) -> bool {
-    // TODO: The PPU can be blocked from OAM during DMA transfers as well
-
     // The PPU can only read from OAM if the LCD is off or the PPU is not in
     // `OamScan` and not in `PixelTransfer`.
     !self.display_enabled()
@@ -287,7 +285,23 @@ impl Ppu {
       )
   }
 
-  /// Returns whether the PPU can access VRAM.
+  /// Returns whether there is a DMA transfer.
+  pub fn dma_transfer_exists(&self) -> bool {
+    self.dma_transfer.is_some()
+  }
+
+  /// Returns whether there is a running DMA transfer, that is transferring bytes.
+  pub fn dma_transfer_running(&self) -> bool {
+    matches!(
+      self.dma_transfer,
+      Some(DmaTransfer {
+        progress: DmaTransferProgress::Transferring { .. },
+        ..
+      })
+    )
+  }
+
+  /// Returns whether the OAM can accessed by the CPU.
   pub fn can_access_vram(&self) -> bool {
     // The PPU can only read VRAM if the LCD is off or the PPU is not in pixel transfer.
     !self.display_enabled() || !matches!(self.current_mode(), PpuMode::PixelTransfer)
@@ -447,6 +461,7 @@ impl Ppu {
 
     let mut sprites = ArrayVec::<SpriteEntry, MAX_SCANLINE_SPRITES>::new();
 
+    // TODO: The PPU can be blocked from OAM during DMA transfers as well
     for chunk in self.oam.chunks_exact(4) {
       if sprites.len() >= MAX_SCANLINE_SPRITES {
         break;
