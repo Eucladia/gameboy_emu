@@ -54,8 +54,9 @@ impl Joypad {
       0b10 => (self.pressed & 0xF0) >> 4,
       // If the 4th and 5th bits are 0, then both groups are combined
       0b00 => (self.pressed & 0x0F) & ((self.pressed & 0xF0) >> 4),
-      // No buttons selected
-      _ => 0x0F,
+      // No button group was selected
+      0b11 => 0x0F,
+      _ => unreachable!(),
     };
 
     // The upper 2 bits are always set
