@@ -41,7 +41,7 @@ impl Joypad {
       // Mark all buttons as released
       pressed: 0xFF,
       // Mark the groups as unselected
-      button_group: 0xF0,
+      button_group: 0x30,
     }
   }
 
