@@ -277,7 +277,7 @@ impl Hardware {
 
   /// Checks if there are any pending interrupts.
   pub fn has_pending_interrupts(&self) -> bool {
-    (self.interrupts.enabled_bitfield() & self.interrupts.requested_bitfield()) != 0
+    self.interrupts.pending_bitfield() != 0
   }
 
   /// Returns the next pending interrupt to be handled, if any.
