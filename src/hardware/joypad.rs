@@ -47,17 +47,7 @@ impl Joypad {
 
   /// Reads the value of the [`Joypad`].
   pub fn read_register(&self) -> u8 {
-    let lower_nibble = match (self.button_group >> 4) & 0x3 {
-      // The action group was selected, if the 5th bit was 0
-      0b01 => self.pressed & 0x0F,
-      // The d-pad group was selected, if the 4th bit was 0
-      0b10 => (self.pressed & 0xF0) >> 4,
-      // If the 4th and 5th bits are 0, then both groups are combined
-      0b00 => (self.pressed & 0x0F) & ((self.pressed & 0xF0) >> 4),
-      // No button group was selected
-      0b11 => 0x0F,
-      _ => unreachable!(),
-    };
+    let lower_nibble = self.register_value();
 
     // The upper 2 bits are always set
     0b1100_0000 | self.button_group | lower_nibble
@@ -76,17 +66,38 @@ impl Joypad {
     button: Button,
     button_state: ButtonAction,
   ) {
-    let before = self.pressed;
-    let mask = button as u8;
+    let before_lower_nibble = self.register_value();
 
     match button_state {
       // A button is pressed if its bit is set to 0
-      ButtonAction::Pressed => remove_flag!(&mut self.pressed, mask),
-      ButtonAction::Released => add_flag!(&mut self.pressed, mask),
+      ButtonAction::Pressed => remove_flag!(&mut self.pressed, button as u8),
+      ButtonAction::Released => add_flag!(&mut self.pressed, button as u8),
     }
 
-    if self.pressed != before {
+    let after_lower_nibble = self.register_value();
+
+    // Interrupts are ONLY fired if there is a rising edge in the lower nibble
+    // of the register for the currently selected button group.
+    let before_mask = before_lower_nibble ^ 0b1111_1111;
+    let after_mask = after_lower_nibble ^ 0b0000_0000;
+
+    if before_mask & after_mask != 0 {
       interrupts.request_interrupt(Interrupt::Joypad);
+    }
+  }
+
+  /// Returns the lower nibble of the selected group of buttons.
+  const fn register_value(&self) -> u8 {
+    match (self.button_group >> 4) & 0x3 {
+      // The action group was selected, if the 5th bit was 0
+      0b01 => self.pressed & 0x0F,
+      // The d-pad group was selected, if the 4th bit was 0
+      0b10 => (self.pressed & 0xF0) >> 4,
+      // If the 4th and 5th bits are 0, then both groups are combined
+      0b00 => (self.pressed & 0x0F) & ((self.pressed & 0xF0) >> 4),
+      // No button group was selected
+      0b11 => 0x0F,
+      _ => unreachable!(),
     }
   }
 }
