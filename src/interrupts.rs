@@ -1,4 +1,4 @@
-use crate::flags::{add_flag, remove_flag};
+use crate::flags::{add_flag, is_flag_set, remove_flag};
 
 /// A kind of interrupt.
 #[derive(Debug, Copy, Clone)]
@@ -61,6 +61,33 @@ impl Interrupts {
     // The upper 3 bits of IF return are set when reading
     self.requested | 0b1110_0000
   }
+
+  /// Returns a bitfield of the pending interrupts.
+  pub const fn pending_bitfield(&self) -> u8 {
+    self.enabled_bitfield() & self.requested_bitfield() & 0b0001_1111
+  }
+
+  /// Returns the next pending interrupt, from the bitfield, if any.
+  pub const fn next_interrupt(bitfield: u8) -> Option<Interrupt> {
+    // Make sure that the upper 3 bits are cleared
+    let pending = bitfield & 0b0001_1111;
+
+    // Interrupts with lower bit values have higher priority
+    if is_flag_set!(pending, Interrupt::VBlank as u8) {
+      Some(Interrupt::VBlank)
+    } else if is_flag_set!(pending, Interrupt::Lcd as u8) {
+      Some(Interrupt::Lcd)
+    } else if is_flag_set!(pending, Interrupt::Timer as u8) {
+      Some(Interrupt::Timer)
+    } else if is_flag_set!(pending, Interrupt::Serial as u8) {
+      Some(Interrupt::Serial)
+    } else if is_flag_set!(pending, Interrupt::Joypad as u8) {
+      Some(Interrupt::Joypad)
+    } else {
+      // This case can only happen if the pending interrupts is 0
+      None
+    }
+  }
 }
 
 impl Interrupt {
@@ -72,11 +99,5 @@ impl Interrupt {
     let leading_zeros = (self as u8).trailing_zeros() as u16;
 
     BASE_INTERRUPT_ADDRESS + leading_zeros * INTERRUPT_OFFSET
-  }
-
-  /// Returns the [`Interrupt`] of higher priority.
-  pub const fn prioritize(lhs: Interrupt, rhs: Interrupt) -> Interrupt {
-    // Interrupts with lower bit values have higher priority
-    if (lhs as u8) < (rhs as u8) { lhs } else { rhs }
   }
 }

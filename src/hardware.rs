@@ -16,7 +16,6 @@ pub use joypad::Joypad;
 pub use timer::Timer;
 
 use crate::{
-  flags::is_flag_set,
   hardware::{
     apu::{Apu, AudioSample},
     cartridge::{Cartridge, Mbc1, RomOnly},
@@ -283,25 +282,9 @@ impl Hardware {
 
   /// Returns the next pending interrupt to be handled, if any.
   pub fn next_pending_interrupt(&self) -> Option<Interrupt> {
-    let pending = self.interrupts.enabled_bitfield() & self.interrupts.requested_bitfield();
-    // Make sure that the upper 3 bits are not set
-    let pending = pending & 0b0001_1111;
+    let pending = self.interrupts.pending_bitfield();
 
-    // Interrupts with lower bit values have higher priority
-    if is_flag_set!(pending, Interrupt::VBlank as u8) {
-      Some(Interrupt::VBlank)
-    } else if is_flag_set!(pending, Interrupt::Lcd as u8) {
-      Some(Interrupt::Lcd)
-    } else if is_flag_set!(pending, Interrupt::Timer as u8) {
-      Some(Interrupt::Timer)
-    } else if is_flag_set!(pending, Interrupt::Serial as u8) {
-      Some(Interrupt::Serial)
-    } else if is_flag_set!(pending, Interrupt::Joypad as u8) {
-      Some(Interrupt::Joypad)
-    } else {
-      // This case can only happen if the pending interrupts is 0.
-      None
-    }
+    Interrupts::next_interrupt(pending)
   }
 
   /// Clears a requested [`Interrupt`].

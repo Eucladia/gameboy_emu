@@ -4,7 +4,7 @@ use crate::{
     Hardware,
     registers::{self, Registers},
   },
-  interrupts::Interrupt,
+  interrupts::{Interrupt, Interrupts},
 };
 use macros::*;
 
@@ -137,6 +137,19 @@ impl Cpu {
         // state if we need to handle interrupts.
         if self.should_handle_interrupts {
           self.state = CpuState::HandlingInterrupts;
+        }
+
+        // Interrupts are checked TWICE. Our first check is done at the end of an instruction,
+        // which only just checks if there is an interrupt, not which one.
+        //
+        // Interrupts are then also to be checked during T3, just before the write of the lower
+        // byte of the PC to the stack. This is important because the write to the
+        // stack can potentially change the next interrupt that needs to be handled.
+        if matches!(self.state, CpuState::HandlingInterrupts) && matches!(self.cycle, CpuCycle::M4)
+        {
+          let pending_interrupt = hardware.next_pending_interrupt().map_or(0, |x| x as u8);
+
+          self.data_buffer[0] = pending_interrupt;
         }
       }
       0 => {
@@ -2510,56 +2523,20 @@ impl Cpu {
 
       self.cycle = M4;
     } else if matches!(self.cycle, M4) {
-      // The vector address for when there is no longer an interrupt to handle.
+      // The vector address when there an interrupt should be cancelled.
       const INTERRUPT_CANCELLATION_VECTOR: u16 = 0x0000;
+
+      // Recreate the pending interrupt, that was checked for, on T3 of this cycle
+      let pending_interrupt_flag = self.data_buffer[0];
+      let interrupt = Interrupts::next_interrupt(pending_interrupt_flag);
 
       let pc_low = (self.registers.pc & 0x00FF) as u8;
 
-      // Keep track of the pending interrupt before the call to write to the stack because
-      // that can overwrite the `IE` and `IF` registers, thus potentially changing the next
-      // interrupt that should be handled.
-      let prev_interrupt = hardware.next_pending_interrupt();
-
-      // Write the lower byte of the PC to the stack
       hardware.write_byte(self.registers.sp, pc_low);
-
-      // Check *again* for the next interrupt. This can differ from the previous interrupt
-      // if the write to the stack changed the `IE` or `IF` registers.
-      let curr_interrupt = hardware.next_pending_interrupt();
-
-      // There are 4 cases that to consider when handling interrupts in a cycle-accurate manner:
-      //
-      // 1) There was no previous interrupt and now there is one. If so, handle the newer one.
-      //    This happens when the `IE`/`IF` registers got changed when writing the upper byte
-      //    of the PC to the stack.
-      //
-      // 2) There was a previous interrupt, but none now. If so, handle the older one.
-      //    This happens when the `IE`/`IF` registers got changed when writing the lower byte
-      //    of the PC to the stack.
-      //
-      // 3) There was a previous interrupt and there is a new interrupt. If so, get the
-      //    interrupt with higher priority.
-      //    This can occur when interrupts get enabled or disabled when writing the
-      //    lower byte of the PC to the stack, so we need to make sure that we handle
-      //    the interrupt with the highest priority.
-      //
-      // 4) There was no previous interrupt and there still is none. If so, go to the
-      //    cancellation vector, which is 0x0000.
-      //    This occurs when the `IE`/`IF` registers got changed when writing the upper byte
-      //    of the PC to the stack.
-      let interrupt = match (prev_interrupt, curr_interrupt) {
-        (None, Some(new)) => Some(new),
-        (Some(old), None) => Some(old),
-        // NOTE: I could implement `Ord` for `Interrupt` and get rid of this. In fact,
-        // this ENTIRE match could be removed, but I prefer this way since it's more explicit
-        // and the cases can be seen more clearly.
-        (Some(old), Some(new)) => Some(Interrupt::prioritize(old, new)),
-        (None, None) => None,
-      };
 
       self.registers.pc = interrupt.map_or(INTERRUPT_CANCELLATION_VECTOR, Interrupt::to_vector);
 
-      // Make sure we mark the interrupt as handled in the IF register.
+      // Make sure we mark the interrupt as handled in the `IF` register.
       if let Some(interrupt) = interrupt {
         hardware.clear_interrupt(interrupt);
       }
