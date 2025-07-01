@@ -120,11 +120,16 @@ impl Cpu {
 
   /// Steps the CPU by 1 T-cycle.
   pub fn step(&mut self, hardware: &mut Hardware) {
+    const T1: usize = 1;
+    const T2: usize = 2;
+    const T3: usize = 3;
+    const T4: usize = 0;
+
     self.t_cycles = self.t_cycles.wrapping_add(1);
 
     match self.t_cycles % 4 {
-      1 | 2 => {}
-      3 => {
+      T1 | T2 => {}
+      T3 => {
         // Perform an initial fetch to avoid the assumption that the first instruction
         // at address 0x0100 will always be a `NOP`.
         if !self.initial_fetch {
@@ -152,7 +157,7 @@ impl Cpu {
           self.data_buffer[0] = pending_interrupt;
         }
       }
-      0 => {
+      T4 => {
         // The `EI` instruction has a delay of 4 T-cycles.
         if self.last_instruction == 0xFB {
           self.interrupt_master_enabled = true;
