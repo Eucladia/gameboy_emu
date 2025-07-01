@@ -132,7 +132,7 @@ impl Cpu {
       T3 => {
         // Perform an initial fetch to avoid assuming that the first instruction is `NOP`
         if !self.initial_fetch {
-          self.fetch_cycle(hardware);
+          self.complete_cycle(hardware);
           self.initial_fetch = true;
         }
 
