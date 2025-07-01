@@ -19,7 +19,7 @@ impl Cartridge {
   /// Writes the value to the address in ROM.
   pub fn write_rom(&mut self, address: u16, value: u8) {
     match self {
-      // This cartridge type does not have any ROM
+      // Cannot write to ROM-only cartridges
       Cartridge::RomOnly(_) => {}
       Cartridge::Mbc1(cartridge) => cartridge.write_rom(address, value),
     }

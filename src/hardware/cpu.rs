@@ -130,8 +130,7 @@ impl Cpu {
     match self.t_cycles % 4 {
       T1 | T2 => {}
       T3 => {
-        // Perform an initial fetch to avoid the assumption that the first instruction
-        // at address 0x0100 will always be a `NOP`.
+        // Perform an initial fetch to avoid assuming that the first instruction is `NOP`
         if !self.initial_fetch {
           self.fetch_cycle(hardware);
           self.initial_fetch = true;
@@ -1747,8 +1746,6 @@ impl Cpu {
           //
           // In this bugged state, the program counter is NOT incremented after
           // fetching the next byte.
-          //
-          // See https://gbdev.io/pandocs/halt.html for more.
           if !self.interrupt_master_enabled && hardware.has_pending_interrupts() {
             self.halt_bug = true;
             // The CPU doesn't actually enter a halted state in the case of a bugged
@@ -1880,7 +1877,7 @@ impl Cpu {
       (false, 0xFB) => {
         if matches!(self.cycle, M1) {
           // We shouldn't actually update the master interrupt flag immediately
-          // because this instruction seems to have a delay of 4 T-cycles
+          // because this instruction has a delay of 4 T-cycles.
           self.fetch_cycle(hardware);
         }
       }
@@ -2528,7 +2525,7 @@ impl Cpu {
 
       self.cycle = M4;
     } else if matches!(self.cycle, M4) {
-      // The vector address when there an interrupt should be cancelled.
+      // The vector address for when an interrupt should be cancelled.
       const INTERRUPT_CANCELLATION_VECTOR: u16 = 0x0000;
 
       // Recreate the pending interrupt, that was checked for, on T3 of this cycle

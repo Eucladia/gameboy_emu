@@ -25,8 +25,6 @@ pub struct Ppu {
   /// LCDC Y-Coordinate aka the current scanline.
   ly: u8,
   /// The window's scanline.
-  ///
-  /// See https://gbdev.io/pandocs/Tile_Maps.html#window for more.
   wly: u8,
   /// LY Compare.
   lyc: u8,
@@ -324,12 +322,10 @@ impl Ppu {
     let (base_addr, tile_index) = if is_flag_set!(self.lcdc, LcdControl::BackgroundTileData as u8) {
       (0x8000, tile_index)
     } else {
-      // Tile indices in this region are signed, so we need to offset them accordingly
+      // Tile indices in this region are signed, so we need to offset them accordingly.
       //
       // Tile indices [0, 128) reference sprites starting from 0x9000 and
-      // tile indices [128, 255) reference sprites starting from 0x8800
-      //
-      // See https://gbdev.io/pandocs/Tile_Data.html#vram-tile-data for more info.
+      // tile indices [128, 255) reference sprites starting from 0x8800.
       if tile_index < 128 {
         (0x9000, tile_index)
       } else {

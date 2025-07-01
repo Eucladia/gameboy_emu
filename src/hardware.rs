@@ -177,7 +177,7 @@ impl Hardware {
             const DMA_TRANSFER_MAX_BYTES: u16 = 160;
             const DMA_TRANSFER_DURATION: u16 = DMA_TRANSFER_MAX_BYTES * CYCLES_PER_TRANSFER;
 
-            // Check for this at the start, otherwise we would end the DMA transfer 1 M-cycle
+            // Check for this at the start, otherwise we would end the DMA transfer 1 T-cycle
             // before it should actually be over. This is important to pass `oam_dma_timing`.
             if ticks == DMA_TRANSFER_DURATION {
               self.ppu.dma_transfer = None;
@@ -280,7 +280,7 @@ impl Hardware {
     self.interrupts.pending_bitfield() != 0
   }
 
-  /// Returns the next pending interrupt to be handled, if any.
+  /// Returns the next pending [`Interrupt`] to be handled, if any.
   pub fn next_pending_interrupt(&self) -> Option<Interrupt> {
     let pending = self.interrupts.pending_bitfield();
 
@@ -297,6 +297,5 @@ impl Hardware {
 const MEMORY_SIZE: u16 = 0x2000;
 /// The amount of fast, high memory.
 const HIGH_RAM_SIZE: u16 = 0x7F;
-
 /// The address where the cartridge type is stored.
 const CARTRIDGE_TYPE: u16 = 0x147;

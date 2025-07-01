@@ -35,7 +35,7 @@ pub enum Button {
 }
 
 impl Joypad {
-  /// Creates a new [`Joypad`] in an unreleased state.
+  /// Creates a new [`Joypad`] in a released state.
   pub const fn new() -> Self {
     Self {
       // Mark all buttons as released

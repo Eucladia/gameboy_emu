@@ -17,9 +17,6 @@ pub struct Timer {
   /// The number of ticks until an interrupt will be fired, if any.
   ticks_til_interrupt: u8,
   /// The previous AND result.
-  ///
-  /// The AND result is described as the extracted bit from doing the following:
-  /// `counter_bit & timer_enable_bit`.
   prev_and_result: bool,
 }
 

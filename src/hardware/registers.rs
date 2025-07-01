@@ -49,7 +49,7 @@ pub struct Registers {
   /// The stack pointer.
   pub sp: u16,
 
-  /// Instruction register.
+  /// The instruction register.
   pub ir: u8,
 }
 
