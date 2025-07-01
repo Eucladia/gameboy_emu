@@ -76,12 +76,8 @@ impl Joypad {
 
     let after_lower_nibble = self.register_value();
 
-    // Interrupts are ONLY fired if there is a rising edge in the lower nibble
-    // of the register for the currently selected button group.
-    let before_mask = before_lower_nibble ^ 0b1111_1111;
-    let after_mask = after_lower_nibble ^ 0b0000_0000;
-
-    if before_mask & after_mask != 0 {
+    // Interrupts are ONLY fired if there is a falling edge in the lower nibble
+    if before_lower_nibble & !after_lower_nibble != 0 {
       interrupts.request_interrupt(Interrupt::Joypad);
     }
   }
