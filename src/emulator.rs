@@ -26,7 +26,7 @@ impl Emulator {
       self.hardware.step_ppu();
       self.hardware.step_apu();
 
-      if self.hardware.ppu.dma_transfer_exists() {
+      if self.hardware.dma_transfer_exists() {
         self.hardware.step_dma_transfer();
       }
     }
