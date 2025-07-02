@@ -7,11 +7,14 @@ and this project does not adhere to [Semantic Versioning](https://semver.org/spe
 
 ## [Unreleased]
 
+## [0.2.0] - 2025-07-02
+
+This release aims to improve emulator accuracy.
+
 ### Added
 - T-cycle accuracy.
 - Support for incrementing and decrementing the master volume via `Shift` + `+` / `-`.
 - Toggleable volume overlay when pressing `Shift` + `1`.
-- Basic guide.
 - Add directional arrow key support.
 
 ### Fixed
