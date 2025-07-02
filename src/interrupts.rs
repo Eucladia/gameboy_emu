@@ -68,7 +68,7 @@ impl Interrupts {
   }
 
   /// Returns the next pending interrupt, from the bitfield, if any.
-  pub const fn next_interrupt(bitfield: u8) -> Option<Interrupt> {
+  pub const fn next_interrupt_from_bitfield(bitfield: u8) -> Option<Interrupt> {
     // Make sure that the upper 3 bits are cleared
     let pending = bitfield & 0b0001_1111;
 

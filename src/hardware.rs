@@ -284,7 +284,7 @@ impl Hardware {
   pub fn next_pending_interrupt(&self) -> Option<Interrupt> {
     let pending = self.interrupts.pending_bitfield();
 
-    Interrupts::next_interrupt(pending)
+    Interrupts::next_interrupt_from_bitfield(pending)
   }
 
   /// Clears a requested [`Interrupt`].

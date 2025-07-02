@@ -2529,8 +2529,8 @@ impl Cpu {
       const INTERRUPT_CANCELLATION_VECTOR: u16 = 0x0000;
 
       // Recreate the pending interrupt, that was checked for, on T3 of this cycle
-      let pending_interrupt_flag = self.data_buffer[0];
-      let interrupt = Interrupts::next_interrupt(pending_interrupt_flag);
+      let pending_interrupt_bitfield = self.data_buffer[0];
+      let interrupt = Interrupts::next_interrupt_from_bitfield(pending_interrupt_bitfield);
 
       let pc_low = (self.registers.pc & 0x00FF) as u8;
 
