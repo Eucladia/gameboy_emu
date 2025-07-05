@@ -1981,7 +1981,7 @@ impl Cpu {
 
       // Extended Instruction Set
 
-      // BIT 0..8, r8 | [HL}]
+      // BIT 0..8, r8 | [HL]
       (true, 0x40..=0x7F) => {
         if matches!(self.cycle, M1) {
           if is_src_register_memory!(opcode) {
@@ -2577,7 +2577,7 @@ impl Cpu {
     self.registers.ir = self.fetch_byte(hardware);
   }
 
-  /// Marks the completion of the current execution and fetches the next cycle.
+  /// Marks the completion of the current execution and checks for interrupts.
   fn fetch_cycle(&mut self, hardware: &mut Hardware) {
     self.complete_cycle(hardware);
 
