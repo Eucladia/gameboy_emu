@@ -3,7 +3,7 @@ use crate::{
   interrupts::{Interrupt, Interrupts},
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Timer {
   /// The timer counter register.
   tima: u8,
@@ -14,22 +14,31 @@ pub struct Timer {
   /// The internal 16-bit counter used for DIV (upper 8 bits) and for timing.
   counter: u16,
 
-  /// The number of ticks until an interrupt will be fired, if any.
-  ticks_til_interrupt: u8,
+  /// The timer interrupt.
+  timer_interrupt: Option<TimerInterrupt>,
   /// The previous AND result.
   prev_and_result: bool,
 }
 
+/// A timer interrupt to be fired.
+#[derive(Debug, Clone)]
+enum TimerInterrupt {
+  /// The TMA register is being reloaded.
+  Reloading,
+  /// The number of ticks left until the interrupt is fired.
+  Delay { ticks: u8 },
+}
+
 impl Timer {
   /// Creates a new [`Timer`].
-  pub const fn new() -> Self {
+  pub fn new() -> Self {
     Self {
       tima: 0,
       tma: 0,
       tac: 0,
       counter: 0xABCC,
 
-      ticks_til_interrupt: 0,
+      timer_interrupt: None,
       prev_and_result: false,
     }
   }
@@ -39,12 +48,21 @@ impl Timer {
     self.counter = self.counter.wrapping_add(1);
 
     // The interrupt gets delayed by 4 T-cycles after TIMA overflows.
-    if self.ticks_til_interrupt > 0 {
-      self.ticks_til_interrupt -= 1;
+    if let Some(interrupt_delay) = &self.timer_interrupt {
+      match interrupt_delay {
+        TimerInterrupt::Reloading => self.timer_interrupt = None,
+        &TimerInterrupt::Delay { ticks } => {
+          let new_ticks = ticks - 1;
 
-      if self.ticks_til_interrupt == 0 {
-        self.tima = self.tma;
-        interrupts.request_interrupt(Interrupt::Timer);
+          if new_ticks == 0 {
+            self.tima = self.tma;
+            self.timer_interrupt = Some(TimerInterrupt::Reloading);
+
+            interrupts.request_interrupt(Interrupt::Timer);
+          } else {
+            self.timer_interrupt = Some(TimerInterrupt::Delay { ticks: new_ticks })
+          }
+        }
       }
     } else {
       // Compare the extracted bit of the updated counter with the timer enable bit
@@ -53,7 +71,10 @@ impl Timer {
 
       if self.prev_and_result && !curr_and_result {
         self.tima = self.tima.wrapping_add(1);
-        self.ticks_til_interrupt = if self.tima == 0 { 4 } else { 0 };
+
+        if self.tima == 0 {
+          self.timer_interrupt = Some(TimerInterrupt::Delay { ticks: 4 });
+        }
       }
 
       self.prev_and_result = curr_and_result;
@@ -80,17 +101,28 @@ impl Timer {
         self.counter = 0;
       }
       0xFF05 => {
-        // If TIMA is written to during the 4 T-cycles after a TIMA overflow,
-        // then the TMA reload and interrupt request are aborted.
-        if self.ticks_til_interrupt > 0 {
-          self.tima = value;
-          self.ticks_til_interrupt = 0;
-        } else {
+        // Writes to TIMA when it's being reloaded are ignored
+        if !matches!(self.timer_interrupt, Some(TimerInterrupt::Reloading)) {
           self.tima = value;
         }
+
+        // Writes to TIMA when it overflowed cancels the interrupt
+        if matches!(
+          self.timer_interrupt,
+          Some(TimerInterrupt::Delay { ticks: 4 })
+        ) {
+          self.timer_interrupt = None;
+        }
       }
-      // Reloads use the new TMA value, even if it was written to on the same cycle
-      0xFF06 => self.tma = value,
+      0xFF06 => {
+        self.tma = value;
+
+        // Writes to TMA when it's being reloaded also updates TIMA
+        if matches!(self.timer_interrupt, Some(TimerInterrupt::Reloading)) {
+          self.tima = self.tma;
+        }
+      }
+
       0xFF07 => {
         // We should update the previous AND result when changing TAC because
         // we update the internal clock counter inside `step`, then check against

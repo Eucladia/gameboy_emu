@@ -7,6 +7,10 @@ and this project does not adhere to [Semantic Versioning](https://semver.org/spe
 
 ## [Unreleased]
 
+### Fixed
+- Fixed `TIMA` and `TMA` writes when overflowing and reloading (Mooneye's `tima_write_reloading`,
+  `tma_write_reloading`).
+
 ## [0.2.0] - 2025-07-02
 
 This release aims to improve emulator accuracy.
