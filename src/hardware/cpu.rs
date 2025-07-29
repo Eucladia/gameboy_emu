@@ -45,8 +45,6 @@ pub struct Cpu {
   saw_prefix_opcode: bool,
   /// The last executed instruction.
   last_instruction: u8,
-  /// Whether the initial instruction was fetched.
-  initial_fetch: bool,
   /// Temporary storage to store things in-between M-cycles when executing instructions.
   data_buffer: [u8; 2],
 }
@@ -82,7 +80,6 @@ impl Cpu {
       cycle: CpuCycle::M1,
       should_handle_interrupts: false,
       last_instruction: 0x00,
-      initial_fetch: false,
       data_buffer: [0; 2],
       saw_prefix_opcode: false,
     }
@@ -130,12 +127,6 @@ impl Cpu {
     match self.t_cycles % 4 {
       T1 | T2 => {}
       T3 => {
-        // Perform an initial fetch to avoid assuming that the first instruction is `NOP`
-        if !self.initial_fetch {
-          self.complete_cycle(hardware);
-          self.initial_fetch = true;
-        }
-
         // The check for interrupts supposedly occur during T3 from the end of the
         // previous instruction's fetch, so lets transition into the appropriate
         // state if we need to handle interrupts.
