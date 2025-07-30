@@ -39,8 +39,8 @@ pub struct Cpu {
   // Stuff for T-cycle accuracy
   /// The current cycle of the CPU during execution.
   cycle: CpuCycle,
-  /// Whether the CPU should handle interrupts on the next M-cycle.
-  should_handle_interrupts: bool,
+  /// Whether the CPU should check for pending interrupts.
+  should_check_interrupts: bool,
   /// Whether the next instruction should be parsed from the extended instruction set.
   saw_prefix_opcode: bool,
   /// The last executed instruction.
@@ -78,7 +78,7 @@ impl Cpu {
       t_cycles: 0,
 
       cycle: CpuCycle::M1,
-      should_handle_interrupts: false,
+      should_check_interrupts: false,
       last_instruction: 0x00,
       data_buffer: [0; 2],
       saw_prefix_opcode: false,
@@ -128,20 +128,27 @@ impl Cpu {
       T1 | T2 => {}
       T3 => {
         // The check for interrupts supposedly occur during T3 from the end of the
-        // previous instruction's fetch, so lets transition into the appropriate
-        // state if we need to handle interrupts.
-        if self.should_handle_interrupts {
-          self.state = CpuState::HandlingInterrupts;
+        // previous instruction's fetch. Since we're emulating the fetch overlap, lets
+        // transition into the appropriate state if we have pending interrupts.
+        if self.should_check_interrupts {
+          if self.interrupt_master_enabled && hardware.has_pending_interrupts() {
+            self.state = CpuState::HandlingInterrupts;
+          }
+
+          self.should_check_interrupts = false;
         }
 
-        // Interrupts are checked TWICE. Our first check is done at the end of an instruction,
-        // which only just checks if there is an interrupt, not which one.
+        // Interrupts are checked twice:
         //
-        // Interrupts are then also to be checked during T3, just before the write of the lower
-        // byte of the PC to the stack. This is important because the write to the
-        // stack can potentially change the next interrupt that needs to be handled.
-        if matches!(self.state, CpuState::HandlingInterrupts) && matches!(self.cycle, CpuCycle::M4)
-        {
+        //   - At the end of an instruction during. This ends up being T3 of the next cycle
+        // because of the fetch overlap.
+        //
+        //  - Before the write of the lower byte of the PC to the stack during interrupt
+        // handling. This coincides to T3 of M4 when handling interrupts.
+        if matches!(
+          (self.state, self.cycle),
+          (CpuState::HandlingInterrupts, CpuCycle::M4)
+        ) {
           let pending_interrupt = hardware.next_pending_interrupt().map_or(0, |x| x as u8);
 
           self.data_buffer[0] = pending_interrupt;
@@ -157,16 +164,12 @@ impl Cpu {
           CpuState::Running => self.step_instruction(hardware),
           CpuState::HandlingInterrupts => self.step_interrupts(hardware),
           CpuState::Halted => {
+            // Exit out of HALT mode if we have any pending interrupts
             if hardware.has_pending_interrupts() {
-              // If the CPU was successfully halted and there weren't any immediate
-              // interrupts following the completion of the `HALT` instruction, and
-              // we now have some pending interrupts, then we should start handling
-              // interrupts if the IME is set.
-              //
-              // If the IME is not set, then we should exit out of the halted state,
-              // since it should have been 4 T-cycles by now and we have pending interrupts.
+              // Don't start doing the work immediately, since there's an M-cycle
+              // delay when the CPU exits HALT mode.
               if self.interrupt_master_enabled {
-                self.should_handle_interrupts = true;
+                self.state = CpuState::HandlingInterrupts;
               } else {
                 self.state = CpuState::Running;
               }
@@ -2499,6 +2502,8 @@ impl Cpu {
     use CpuCycle::*;
 
     if matches!(self.cycle, M1) {
+      self.interrupt_master_enabled = false;
+
       // Undo the increment from the end of the previous instruction
       self.registers.pc = self.registers.pc.wrapping_sub(1);
 
@@ -2534,8 +2539,6 @@ impl Cpu {
         hardware.clear_interrupt(interrupt);
       }
 
-      self.interrupt_master_enabled = false;
-
       self.cycle = M5;
     } else if matches!(self.cycle, M5) {
       self.state = CpuState::Running;
@@ -2558,23 +2561,21 @@ impl Cpu {
     byte
   }
 
-  /// Marks the completion of the current execution.
+  /// Marks the completion of the current instruction.
   fn complete_cycle(&mut self, hardware: &mut Hardware) {
     self.cycle = CpuCycle::M1;
 
     self.last_instruction = self.registers.ir;
 
-    // The CPU indefinitely fetches the next instruction byte, even if there are interrupts.
+    // The CPU indefinitely fetches the next instruction byte
     self.registers.ir = self.fetch_byte(hardware);
   }
 
-  /// Marks the completion of the current execution and checks for interrupts.
+  /// Marks the completion of the current instruction and allows interrupts to be checked.
   fn fetch_cycle(&mut self, hardware: &mut Hardware) {
     self.complete_cycle(hardware);
 
-    // Only process interrupts when the IME is also enabled.
-    self.should_handle_interrupts =
-      self.interrupt_master_enabled && hardware.has_pending_interrupts();
+    self.should_check_interrupts = true;
   }
 
   /// Reads a value from the memory register.

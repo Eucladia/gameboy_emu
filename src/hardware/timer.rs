@@ -16,8 +16,6 @@ pub struct Timer {
 
   /// The timer interrupt delay.
   timer_interrupt_delay: Option<u8>,
-  /// The previous AND result.
-  prev_and_result: bool,
 }
 
 impl Timer {
@@ -30,14 +28,11 @@ impl Timer {
       counter: 0xABCC,
 
       timer_interrupt_delay: None,
-      prev_and_result: false,
     }
   }
 
   /// Steps the timer by a T-cycle.
   pub fn step(&mut self, interrupts: &mut Interrupts) {
-    self.counter = self.counter.wrapping_add(1);
-
     // The interrupt gets delayed by 4 T-cycles after TIMA overflows.
     match &self.timer_interrupt_delay {
       &Some(ticks) => 'arm: {
@@ -59,19 +54,13 @@ impl Timer {
       None => {}
     }
 
-    // Compare the extracted bit of the updated counter with the timer enable bit
-    let curr_and_result = is_flag_set!(self.tac, TIMER_ENABLE_MASK)
-      & is_flag_set!(self.counter, tac_bit_mask(self.tac));
+    let prev_and_result = self.counter_and_result();
 
-    if self.prev_and_result && !curr_and_result {
-      self.tima = self.tima.wrapping_add(1);
+    self.counter = self.counter.wrapping_add(1);
 
-      if self.tima == 0 {
-        self.timer_interrupt_delay = Some(4);
-      }
-    }
+    let curr_and_result = self.counter_and_result();
 
-    self.prev_and_result = curr_and_result;
+    self.handle_counter_falling_edge(prev_and_result, curr_and_result);
   }
 
   /// Reads from the timer's registers.
@@ -91,7 +80,13 @@ impl Timer {
     match address {
       // Writing to DIV resets the internal counter
       0xFF04 => {
+        let prev_and_result = self.counter_and_result();
+
         self.counter = 0;
+
+        let curr_and_result = self.counter_and_result();
+
+        self.handle_counter_falling_edge(prev_and_result, curr_and_result);
       }
       0xFF05 => {
         // Writes to TIMA when it's being reloaded are ignored
@@ -114,16 +109,32 @@ impl Timer {
       }
 
       0xFF07 => {
-        // We should update the previous AND result when changing TAC because
-        // we update the internal clock counter inside `step`, then check against
-        // that updated counter.
-        self.prev_and_result = is_flag_set!(self.tac, TIMER_ENABLE_MASK)
-          & is_flag_set!(self.counter, tac_bit_mask(self.tac));
+        let prev_and_result = self.counter_and_result();
 
         self.tac = value & 0x07;
+
+        let curr_and_result = self.counter_and_result();
+
+        self.handle_counter_falling_edge(prev_and_result, curr_and_result);
       }
       _ => unreachable!(),
     }
+  }
+
+  /// Handles a potential falling edge in the timer counter.
+  fn handle_counter_falling_edge(&mut self, old_and_result: bool, new_and_result: bool) {
+    if old_and_result && !new_and_result {
+      self.tima = self.tima.wrapping_add(1);
+
+      if self.tima == 0 {
+        self.timer_interrupt_delay = Some(4);
+      }
+    }
+  }
+
+  /// Gets the current and result for the timer counter.
+  const fn counter_and_result(&self) -> bool {
+    is_flag_set!(self.tac, TIMER_ENABLE_MASK) && is_flag_set!(self.counter, tac_bit_mask(self.tac))
   }
 
   /// Returns whether the TIMA register is being reloaded.
