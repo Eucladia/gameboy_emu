@@ -14,19 +14,10 @@ pub struct Timer {
   /// The internal 16-bit counter used for DIV (upper 8 bits) and for timing.
   counter: u16,
 
-  /// The timer interrupt.
-  timer_interrupt: Option<TimerInterrupt>,
+  /// The timer interrupt delay.
+  timer_interrupt_delay: Option<u8>,
   /// The previous AND result.
   prev_and_result: bool,
-}
-
-/// A timer interrupt to be fired.
-#[derive(Debug, Clone)]
-enum TimerInterrupt {
-  /// The TMA register is being reloaded.
-  Reloading,
-  /// The number of ticks left until the interrupt is fired.
-  Delay { ticks: u8 },
 }
 
 impl Timer {
@@ -38,7 +29,7 @@ impl Timer {
       tac: 0,
       counter: 0xABCC,
 
-      timer_interrupt: None,
+      timer_interrupt_delay: None,
       prev_and_result: false,
     }
   }
@@ -48,22 +39,24 @@ impl Timer {
     self.counter = self.counter.wrapping_add(1);
 
     // The interrupt gets delayed by 4 T-cycles after TIMA overflows.
-    if let Some(interrupt_delay) = &self.timer_interrupt {
-      match interrupt_delay {
-        TimerInterrupt::Reloading => self.timer_interrupt = None,
-        &TimerInterrupt::Delay { ticks } => {
-          let new_ticks = ticks - 1;
-
-          if new_ticks == 0 {
-            self.tima = self.tma;
-            self.timer_interrupt = Some(TimerInterrupt::Reloading);
-
-            interrupts.request_interrupt(Interrupt::Timer);
-          } else {
-            self.timer_interrupt = Some(TimerInterrupt::Delay { ticks: new_ticks })
-          }
+    match &self.timer_interrupt_delay {
+      &Some(ticks) => 'arm: {
+        if ticks == 0 {
+          self.timer_interrupt_delay = None;
+          break 'arm;
         }
+
+        let new_ticks = ticks - 1;
+
+        // Reload TIMA and request an interrupt
+        if new_ticks == 0 {
+          self.tima = self.tma;
+          interrupts.request_interrupt(Interrupt::Timer);
+        }
+
+        self.timer_interrupt_delay = Some(new_ticks);
       }
+      None => {}
     }
 
     // Compare the extracted bit of the updated counter with the timer enable bit
@@ -74,7 +67,7 @@ impl Timer {
       self.tima = self.tima.wrapping_add(1);
 
       if self.tima == 0 {
-        self.timer_interrupt = Some(TimerInterrupt::Delay { ticks: 4 });
+        self.timer_interrupt_delay = Some(4);
       }
     }
 
@@ -102,23 +95,20 @@ impl Timer {
       }
       0xFF05 => {
         // Writes to TIMA when it's being reloaded are ignored
-        if !matches!(self.timer_interrupt, Some(TimerInterrupt::Reloading)) {
+        if !self.tima_reloading() {
           self.tima = value;
         }
 
         // Writes to TIMA when it overflowed cancels the interrupt
-        if matches!(
-          self.timer_interrupt,
-          Some(TimerInterrupt::Delay { ticks: 4 })
-        ) {
-          self.timer_interrupt = None;
+        if self.tima_overflowed() {
+          self.timer_interrupt_delay = None;
         }
       }
       0xFF06 => {
         self.tma = value;
 
         // Writes to TMA when it's being reloaded also updates TIMA
-        if matches!(self.timer_interrupt, Some(TimerInterrupt::Reloading)) {
+        if self.tima_reloading() {
           self.tima = self.tma;
         }
       }
@@ -134,6 +124,16 @@ impl Timer {
       }
       _ => unreachable!(),
     }
+  }
+
+  /// Returns whether the TIMA register is being reloaded.
+  const fn tima_reloading(&self) -> bool {
+    matches!(&self.timer_interrupt_delay, Some(0))
+  }
+
+  /// Returns whether the TIMA register overflowed.
+  const fn tima_overflowed(&self) -> bool {
+    matches!(&self.timer_interrupt_delay, Some(4))
   }
 }
 
