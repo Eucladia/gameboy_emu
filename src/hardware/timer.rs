@@ -64,21 +64,21 @@ impl Timer {
           }
         }
       }
-    } else {
-      // Compare the extracted bit of the updated counter with the timer enable bit
-      let curr_and_result = is_flag_set!(self.tac, TIMER_ENABLE_MASK)
-        & is_flag_set!(self.counter, tac_bit_mask(self.tac));
-
-      if self.prev_and_result && !curr_and_result {
-        self.tima = self.tima.wrapping_add(1);
-
-        if self.tima == 0 {
-          self.timer_interrupt = Some(TimerInterrupt::Delay { ticks: 4 });
-        }
-      }
-
-      self.prev_and_result = curr_and_result;
     }
+
+    // Compare the extracted bit of the updated counter with the timer enable bit
+    let curr_and_result = is_flag_set!(self.tac, TIMER_ENABLE_MASK)
+      & is_flag_set!(self.counter, tac_bit_mask(self.tac));
+
+    if self.prev_and_result && !curr_and_result {
+      self.tima = self.tima.wrapping_add(1);
+
+      if self.tima == 0 {
+        self.timer_interrupt = Some(TimerInterrupt::Delay { ticks: 4 });
+      }
+    }
+
+    self.prev_and_result = curr_and_result;
   }
 
   /// Reads from the timer's registers.
