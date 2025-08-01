@@ -215,11 +215,6 @@ impl Hardware {
     }
   }
 
-  /// Returns whether there is a DMA transfer.
-  pub fn dma_transfer_exists(&self) -> bool {
-    self.ppu.dma_transfer_exists()
-  }
-
   /// Reads the I/O registers.
   fn read_io_register(&self, address: u16) -> u8 {
     match address {

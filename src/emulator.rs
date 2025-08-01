@@ -26,20 +26,14 @@ impl Emulator {
       self.hardware.step_timer();
       self.hardware.step_ppu();
       self.hardware.step_apu();
-
-      if self.hardware.dma_transfer_exists() {
-        self.hardware.step_dma_transfer();
-      }
+      self.hardware.step_dma_transfer();
 
       // ---------------------------------- T2 ----------------------------------
       self.cpu.step(&mut self.hardware);
       self.hardware.step_timer();
       self.hardware.step_ppu();
       self.hardware.step_apu();
-
-      if self.hardware.dma_transfer_exists() {
-        self.hardware.step_dma_transfer();
-      }
+      self.hardware.step_dma_transfer();
 
       // ---------------------------------- T3 ----------------------------------
 
@@ -54,20 +48,14 @@ impl Emulator {
       self.cpu.step(&mut self.hardware);
       self.hardware.step_ppu();
       self.hardware.step_apu();
-
-      if self.hardware.dma_transfer_exists() {
-        self.hardware.step_dma_transfer();
-      }
+      self.hardware.step_dma_transfer();
 
       // ---------------------------------- T4 ----------------------------------
       self.cpu.step(&mut self.hardware);
       self.hardware.step_timer();
       self.hardware.step_ppu();
       self.hardware.step_apu();
-
-      if self.hardware.dma_transfer_exists() {
-        self.hardware.step_dma_transfer();
-      }
+      self.hardware.step_dma_transfer();
     }
   }
 }

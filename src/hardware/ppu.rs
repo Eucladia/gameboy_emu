@@ -283,11 +283,6 @@ impl Ppu {
       )
   }
 
-  /// Returns whether there is a DMA transfer.
-  pub fn dma_transfer_exists(&self) -> bool {
-    self.dma_transfer.is_some()
-  }
-
   /// Returns whether there is a running DMA transfer, that is transferring bytes.
   pub fn dma_transfer_running(&self) -> bool {
     matches!(
