@@ -172,7 +172,7 @@ impl Hardware {
               self.ppu.dma_transfer = Some(DmaTransfer::requested_with_ticks(source, new_ticks));
             }
           }
-          &DmaTransferProgress::Transferring { ticks } => {
+          &DmaTransferProgress::Transferring { ticks } => 'arm: {
             const CYCLES_PER_TRANSFER: u16 = 4;
             const DMA_TRANSFER_MAX_BYTES: u16 = 160;
             const DMA_TRANSFER_DURATION: u16 = DMA_TRANSFER_MAX_BYTES * CYCLES_PER_TRANSFER;
@@ -181,8 +181,7 @@ impl Hardware {
             // before it should actually be over. This is important to pass `oam_dma_timing`.
             if ticks == DMA_TRANSFER_DURATION {
               self.ppu.dma_transfer = None;
-
-              return;
+              break 'arm;
             }
 
             let new_ticks = ticks + 1;
