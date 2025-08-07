@@ -1,4 +1,4 @@
-use crate::flags::is_flag_set;
+use crate::flags::{is_flag_set, is_rising_edge};
 
 /// A sweeping pulse channel, known as channel 1.
 #[derive(Debug)]
@@ -172,7 +172,7 @@ impl PulseSweepChannel {
       }
       0x13 => self.nr13 = value,
       0x14 => {
-        let prev_length_enabled = is_flag_set!(self.nr14, TIMER_LENGTH_ENABLE_MASK);
+        let old_value = self.nr14;
         let curr_length_enabled = is_flag_set!(value, TIMER_LENGTH_ENABLE_MASK);
         let should_trigger = is_flag_set!(value, CHANNEL_TRIGGER_MASK);
 
@@ -187,8 +187,7 @@ impl PulseSweepChannel {
         //
         // When these conditions are met, the length gets clocked. If the clock caused
         // it to be 0, then the channel gets disabled as well.
-        if !prev_length_enabled
-          && curr_length_enabled
+        if is_rising_edge!(old_value, value, TIMER_LENGTH_ENABLE_MASK)
           && !will_clock_length
           && self.length_timer > 0
         {

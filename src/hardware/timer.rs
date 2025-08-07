@@ -1,5 +1,5 @@
 use crate::{
-  flags::is_flag_set,
+  flags::{is_falling_edge, is_flag_set},
   hardware::clock::{SystemClock, TCycle},
   interrupts::{Interrupt, Interrupts},
 };
@@ -67,7 +67,9 @@ impl Timer {
 
         let curr_and_result = self.counter_and_result();
 
-        self.handle_counter_falling_edge(prev_and_result, curr_and_result);
+        if is_falling_edge!(prev_and_result, curr_and_result) {
+          self.increment_tima();
+        }
       }
     }
   }
@@ -94,7 +96,9 @@ impl Timer {
 
         let curr_and_result = self.counter_and_result();
 
-        self.handle_counter_falling_edge(prev_and_result, curr_and_result);
+        if is_falling_edge!(prev_and_result, curr_and_result) {
+          self.increment_tima();
+        }
       }
       0xFF05 => {
         // Writes to TIMA when it's being reloaded are ignored
@@ -123,20 +127,20 @@ impl Timer {
 
         let curr_and_result = self.counter_and_result();
 
-        self.handle_counter_falling_edge(prev_and_result, curr_and_result);
+        if is_falling_edge!(prev_and_result, curr_and_result) {
+          self.increment_tima();
+        }
       }
       _ => unreachable!(),
     }
   }
 
-  /// Handles a potential falling edge in the timer counter.
-  fn handle_counter_falling_edge(&mut self, old_and_result: bool, new_and_result: bool) {
-    if old_and_result && !new_and_result {
-      self.tima = self.tima.wrapping_add(1);
+  /// Increments the TIMA register.
+  fn increment_tima(&mut self) {
+    self.tima = self.tima.wrapping_add(1);
 
-      if self.tima == 0 {
-        self.timer_interrupt = TimerInterrupt::Overflowed;
-      }
+    if self.tima == 0 {
+      self.timer_interrupt = TimerInterrupt::Overflowed;
     }
   }
 

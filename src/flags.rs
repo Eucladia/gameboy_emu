@@ -19,8 +19,32 @@ macro_rules! remove_flag {
   };
 }
 
+/// Checks if there's a falling edge.
+macro_rules! is_falling_edge {
+  ($old_value:expr, $new_value:expr, $mask:expr) => {
+    is_flag_set!($old_value, $mask) && !is_flag_set!($new_value, $mask)
+  };
+
+  ($old_result:expr, $new_result:expr) => {
+    $old_result && !$new_result
+  };
+}
+
+/// Checks if there's a rising edge.
+macro_rules! is_rising_edge {
+  ($old_value:expr, $new_value:expr, $mask:expr) => {
+    !is_flag_set!($old_value, $mask) && is_flag_set!($new_value, $mask)
+  };
+
+  ($old_result:expr, $new_result:expr) => {
+    !$old_result && $new_result
+  };
+}
+
 pub(crate) use add_flag;
+pub(crate) use is_falling_edge;
 pub(crate) use is_flag_set;
+pub(crate) use is_rising_edge;
 pub(crate) use remove_flag;
 
 /// The CPU flags that may get affected after executing an instruction.

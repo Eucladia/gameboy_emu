@@ -9,7 +9,7 @@ use std::{
 };
 
 use crate::{
-  flags::{add_flag, is_flag_set},
+  flags::{add_flag, is_falling_edge, is_flag_set, is_rising_edge},
   hardware::apu::{
     noise_channel::NoiseChannel, pulse_channel::PulseChannel,
     pulse_sweep_channel::PulseSweepChannel, wave_channel::WaveChannel,
@@ -173,10 +173,11 @@ impl Apu {
       0xFF26 => {
         const APU_ENABLE_MASK: u8 = 0b1000_0000;
 
-        let turning_off = apu_enabled && !is_flag_set!(value, APU_ENABLE_MASK);
-        let turning_on = !apu_enabled && is_flag_set!(value, APU_ENABLE_MASK);
+        let turning_off = is_falling_edge!(self.nr52, value, APU_ENABLE_MASK);
+        let turning_on = is_rising_edge!(self.nr52, value, APU_ENABLE_MASK);
 
-        // If the APU is being turned off, we need to clear its registers.
+        // If there's a falling edge on the enable bit, meaning the APU is being turned off,
+        // we need to clear its registers.
         if turning_off {
           // Clear sound channels
           self.channel1.clear_registers();
@@ -189,9 +190,8 @@ impl Apu {
           self.nr51 = 0;
         }
 
-        // There's an edge case when there is a rising edge for the APU's enable bit.
-        //
-        // That is, if the APU is being turned on, we need to clear the frame sequencer step.
+        // If there's a rising edge on the enable bit, the APU is being turned on,
+        // we need to clear the frame sequencer step.
         if turning_on {
           self.frame_sequencer_step = 0;
         }

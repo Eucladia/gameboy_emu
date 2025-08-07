@@ -1,5 +1,5 @@
 use crate::{
-  flags::{add_flag, remove_flag},
+  flags::{add_flag, is_falling_edge, remove_flag},
   interrupts::{Interrupt, Interrupts},
 };
 
@@ -77,7 +77,7 @@ impl Joypad {
     let after_lower_nibble = self.register_value();
 
     // Interrupts are ONLY fired if there is a falling edge in the lower nibble
-    if before_lower_nibble & !after_lower_nibble != 0 {
+    if is_falling_edge!(before_lower_nibble != 0, !after_lower_nibble != 0) {
       interrupts.request_interrupt(Interrupt::Joypad);
     }
   }
