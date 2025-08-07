@@ -75,8 +75,7 @@ impl Timer {
   /// Reads from the timer's registers.
   pub fn read_register(&self, address: u16) -> u8 {
     match address {
-      // DIV is stored in bits 6-13 of the internal counter
-      0xFF04 => (self.counter >> 6) as u8,
+      0xFF04 => self.div_value(),
       0xFF05 => self.tima,
       0xFF06 => self.tma,
       0xFF07 => self.tac,
@@ -99,12 +98,12 @@ impl Timer {
       }
       0xFF05 => {
         // Writes to TIMA when it's being reloaded are ignored
-        if !self.tima_reloading() {
+        if !matches!(self.timer_interrupt, TimerInterrupt::Reloading) {
           self.tima = value;
         }
 
         // Writing to TIMA when it overflowed cancels the interrupt
-        if self.tima_overflowed() {
+        if matches!(self.timer_interrupt, TimerInterrupt::Overflowed) {
           self.timer_interrupt = TimerInterrupt::None;
         }
       }
@@ -112,7 +111,7 @@ impl Timer {
         self.tma = value;
 
         // Writes to TMA when it's being reloaded also updates TIMA
-        if self.tima_reloading() {
+        if matches!(self.timer_interrupt, TimerInterrupt::Reloading) {
           self.tima = self.tma;
         }
       }
@@ -141,19 +140,16 @@ impl Timer {
     }
   }
 
+  /// Returns the value of the DIV register
+  const fn div_value(&self) -> u8 {
+    // DIV is actually bits 6-13, not bits 8-15. The top 2 bits have to do
+    // with `STOP` shenanigans.
+    (self.counter >> 6) as u8
+  }
+
   /// Gets the current and result for the timer counter.
   const fn counter_and_result(&self) -> bool {
     is_flag_set!(self.tac, TIMER_ENABLE_MASK) && is_flag_set!(self.counter, tac_bit_mask(self.tac))
-  }
-
-  /// Returns whether the TIMA register is being reloaded.
-  const fn tima_reloading(&self) -> bool {
-    matches!(&self.timer_interrupt, TimerInterrupt::Reloading)
-  }
-
-  /// Returns whether the TIMA register overflowed.
-  const fn tima_overflowed(&self) -> bool {
-    matches!(&self.timer_interrupt, TimerInterrupt::Overflowed)
   }
 }
 
