@@ -2,6 +2,7 @@ use crate::{
   flags::{ConditionalFlag, Flag, add_flag, is_flag_set, remove_flag},
   hardware::{
     Hardware,
+    clock::TCycle,
     registers::{self, Registers},
   },
   interrupts::{Interrupt, Interrupts},
@@ -33,8 +34,6 @@ pub struct Cpu {
   halt_bug: bool,
   /// Master interrupt flag.
   interrupt_master_enabled: bool,
-  // The amount of T-cycles elapsed.
-  t_cycles: usize,
 
   // Stuff for T-cycle accuracy
   /// The current cycle of the CPU during execution.
@@ -75,7 +74,6 @@ impl Cpu {
       registers: Registers::default(),
       halt_bug: false,
       interrupt_master_enabled: false,
-      t_cycles: 0,
 
       cycle: CpuCycle::M1,
       should_check_interrupts: false,
@@ -117,16 +115,9 @@ impl Cpu {
 
   /// Steps the CPU by 1 T-cycle.
   pub fn step(&mut self, hardware: &mut Hardware) {
-    const T1: usize = 1;
-    const T2: usize = 2;
-    const T3: usize = 3;
-    const T4: usize = 0;
-
-    self.t_cycles = self.t_cycles.wrapping_add(1);
-
-    match self.t_cycles % 4 {
-      T1 | T2 => {}
-      T3 => {
+    match hardware.sys_clock.t_cycle() {
+      TCycle::T1 | TCycle::T2 => {}
+      TCycle::T3 => {
         // The check for interrupts supposedly occur during T3 from the end of the
         // previous instruction's fetch. Since we're emulating the fetch overlap, lets
         // transition into the appropriate state if we have pending interrupts.
@@ -139,7 +130,6 @@ impl Cpu {
         }
 
         // Interrupts are checked twice:
-        //
         //   - At the end of an instruction during. This ends up being T3 of the next cycle
         // because of the fetch overlap.
         //
@@ -154,7 +144,7 @@ impl Cpu {
           self.data_buffer[0] = pending_interrupt;
         }
       }
-      T4 => {
+      TCycle::T4 => {
         // The `EI` instruction has a delay of 4 T-cycles.
         if self.last_instruction == 0xFB {
           self.interrupt_master_enabled = true;
@@ -178,7 +168,6 @@ impl Cpu {
           CpuState::Stopped => {}
         }
       }
-      _ => unreachable!(),
     }
   }
 

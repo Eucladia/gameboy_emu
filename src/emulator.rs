@@ -1,4 +1,4 @@
-use crate::hardware::{Cpu, Hardware};
+use crate::hardware::{Cpu, Hardware, clock::TCycle};
 
 /// The Gameboy emulator.
 #[derive(Debug)]
@@ -20,8 +20,12 @@ impl Emulator {
     // The number of T-cycles per frame.
     const CYCLES_PER_FRAME: usize = 70224;
 
+    debug_assert_eq!(self.hardware.sys_clock.t_cycle(), TCycle::T4);
+
     for _ in 0..(CYCLES_PER_FRAME / 4) {
       // ---------------------------------- T1 ----------------------------------
+      self.hardware.step_sys_clock();
+
       self.cpu.step(&mut self.hardware);
       self.hardware.step_timer();
       self.hardware.step_ppu();
@@ -29,6 +33,8 @@ impl Emulator {
       self.hardware.step_dma_transfer();
 
       // ---------------------------------- T2 ----------------------------------
+      self.hardware.step_sys_clock();
+
       self.cpu.step(&mut self.hardware);
       self.hardware.step_timer();
       self.hardware.step_ppu();
@@ -36,21 +42,17 @@ impl Emulator {
       self.hardware.step_dma_transfer();
 
       // ---------------------------------- T3 ----------------------------------
+      self.hardware.step_sys_clock();
 
-      // NOTE: Step the timer first because of the timing sensitive test `rapid_toggle`.
-      //
-      // If we don't do this, then the timer interrupt won't be ready in time for the CPU,
-      // since the CPU does that during T3.
-      //
-      // The alternative is to set the timer delay to 3 T-cycles when there's an overflow
-      // from TAC writes, but that feels hacky and inconsistent.
-      self.hardware.step_timer();
       self.cpu.step(&mut self.hardware);
+      self.hardware.step_timer();
       self.hardware.step_ppu();
       self.hardware.step_apu();
       self.hardware.step_dma_transfer();
 
       // ---------------------------------- T4 ----------------------------------
+      self.hardware.step_sys_clock();
+
       self.cpu.step(&mut self.hardware);
       self.hardware.step_timer();
       self.hardware.step_ppu();

@@ -1,5 +1,6 @@
 pub mod apu;
 pub mod cartridge;
+pub mod clock;
 pub mod cpu;
 pub mod joypad;
 pub mod ppu;
@@ -19,6 +20,7 @@ use crate::{
   hardware::{
     apu::{Apu, AudioSample},
     cartridge::{Cartridge, Mbc1, RomOnly},
+    clock::SystemClock,
     joypad::{Button, ButtonAction},
     ppu::{DmaTransfer, DmaTransferProgress, Ppu},
   },
@@ -41,6 +43,8 @@ pub struct Hardware {
   pub ppu: Ppu,
   /// The audio processing unit.
   pub apu: Apu,
+  /// The system clock.
+  pub sys_clock: SystemClock,
   /// The enableed and requested interrupts.
   interrupts: Interrupts,
 }
@@ -62,6 +66,7 @@ impl Hardware {
       ppu: Ppu::new(),
       apu: Apu::new(),
       interrupts: Interrupts::new(),
+      sys_clock: SystemClock::new(),
       cartridge,
     }
   }
@@ -251,7 +256,7 @@ impl Hardware {
 
   /// Steps the timer by a T-cycle.
   pub fn step_timer(&mut self) {
-    self.timer.step(&mut self.interrupts);
+    self.timer.step(&mut self.interrupts, &self.sys_clock);
   }
 
   /// Steps the PPU by a T-cycle.
@@ -262,6 +267,11 @@ impl Hardware {
   /// Steps the APU by a T-cycle.
   pub fn step_apu(&mut self) {
     self.apu.step();
+  }
+
+  /// Steps the system clock by a T-cycle.
+  pub fn step_sys_clock(&mut self) {
+    self.sys_clock.increment_clock()
   }
 
   /// Returns the audio buffer.

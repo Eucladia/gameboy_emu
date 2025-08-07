@@ -1,5 +1,6 @@
 use crate::{
   flags::is_flag_set,
+  hardware::clock::{SystemClock, TCycle},
   interrupts::{Interrupt, Interrupts},
 };
 
@@ -11,11 +12,21 @@ pub struct Timer {
   tma: u8,
   /// The timer control.
   tac: u8,
-  /// The internal 16-bit counter used for DIV (upper 8 bits) and for timing.
+  /// The internal counter, used for the DIV register.
   counter: u16,
+  /// The timer interrupt.
+  timer_interrupt: TimerInterrupt,
+}
 
-  /// The timer interrupt delay.
-  timer_interrupt_delay: Option<u8>,
+/// The timer interrupt.
+#[derive(Debug, Clone, Copy)]
+enum TimerInterrupt {
+  /// There is currently no timer interrupt.
+  None,
+  /// The TIMA register overflowed and an interrupt will be fired.
+  Overflowed,
+  /// The TIMA register is being reloaded.
+  Reloading,
 }
 
 impl Timer {
@@ -26,48 +37,46 @@ impl Timer {
       tma: 0,
       tac: 0,
       counter: 0xABCC,
-
-      timer_interrupt_delay: None,
+      timer_interrupt: TimerInterrupt::None,
     }
   }
 
   /// Steps the timer by a T-cycle.
-  pub fn step(&mut self, interrupts: &mut Interrupts) {
-    // The interrupt gets delayed by 4 T-cycles after TIMA overflows.
-    match &self.timer_interrupt_delay {
-      &Some(ticks) => 'arm: {
-        if ticks == 0 {
-          self.timer_interrupt_delay = None;
-          break 'arm;
+  pub fn step(&mut self, interrupts: &mut Interrupts, sys_clock: &SystemClock) {
+    match sys_clock.t_cycle() {
+      TCycle::T1 | TCycle::T2 | TCycle::T3 => {}
+      // The timer gets clocked every M-cycle, not T-cycle.
+      TCycle::T4 => {
+        match &self.timer_interrupt {
+          TimerInterrupt::Overflowed => {
+            // Reload TIMA and request an interrupt, since an M-cycle has elapsed.
+            self.tima = self.tma;
+            interrupts.request_interrupt(Interrupt::Timer);
+
+            self.timer_interrupt = TimerInterrupt::Reloading;
+          }
+          TimerInterrupt::Reloading => {
+            self.timer_interrupt = TimerInterrupt::None;
+          }
+          TimerInterrupt::None => {}
         }
 
-        let new_ticks = ticks - 1;
+        let prev_and_result = self.counter_and_result();
 
-        // Reload TIMA and request an interrupt
-        if new_ticks == 0 {
-          self.tima = self.tma;
-          interrupts.request_interrupt(Interrupt::Timer);
-        }
+        self.counter = self.counter.wrapping_add(1);
 
-        self.timer_interrupt_delay = Some(new_ticks);
+        let curr_and_result = self.counter_and_result();
+
+        self.handle_counter_falling_edge(prev_and_result, curr_and_result);
       }
-      None => {}
     }
-
-    let prev_and_result = self.counter_and_result();
-
-    self.counter = self.counter.wrapping_add(1);
-
-    let curr_and_result = self.counter_and_result();
-
-    self.handle_counter_falling_edge(prev_and_result, curr_and_result);
   }
 
   /// Reads from the timer's registers.
   pub fn read_register(&self, address: u16) -> u8 {
     match address {
-      // DIV is stored in the upper 8 bits of the counter
-      0xFF04 => ((self.counter & 0xFF00) >> 8) as u8,
+      // DIV is stored in bits 6-13 of the internal counter
+      0xFF04 => (self.counter >> 6) as u8,
       0xFF05 => self.tima,
       0xFF06 => self.tma,
       0xFF07 => self.tac,
@@ -94,9 +103,9 @@ impl Timer {
           self.tima = value;
         }
 
-        // Writes to TIMA when it overflowed cancels the interrupt
+        // Writing to TIMA when it overflowed cancels the interrupt
         if self.tima_overflowed() {
-          self.timer_interrupt_delay = None;
+          self.timer_interrupt = TimerInterrupt::None;
         }
       }
       0xFF06 => {
@@ -127,7 +136,7 @@ impl Timer {
       self.tima = self.tima.wrapping_add(1);
 
       if self.tima == 0 {
-        self.timer_interrupt_delay = Some(4);
+        self.timer_interrupt = TimerInterrupt::Overflowed;
       }
     }
   }
@@ -139,22 +148,22 @@ impl Timer {
 
   /// Returns whether the TIMA register is being reloaded.
   const fn tima_reloading(&self) -> bool {
-    matches!(&self.timer_interrupt_delay, Some(0))
+    matches!(&self.timer_interrupt, TimerInterrupt::Reloading)
   }
 
   /// Returns whether the TIMA register overflowed.
   const fn tima_overflowed(&self) -> bool {
-    matches!(&self.timer_interrupt_delay, Some(4))
+    matches!(&self.timer_interrupt, TimerInterrupt::Overflowed)
   }
 }
 
 /// Gets the clock select bit mask from the TAC register.
 const fn tac_bit_mask(tac: u8) -> u16 {
   match tac & 0x3 {
-    0b00 => 1 << 9,
-    0b01 => 1 << 3,
-    0b10 => 1 << 5,
-    0b11 => 1 << 7,
+    0b00 => 1 << 7,
+    0b01 => 1 << 1,
+    0b10 => 1 << 3,
+    0b11 => 1 << 5,
     _ => unreachable!(),
   }
 }
