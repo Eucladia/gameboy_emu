@@ -61,11 +61,11 @@ impl Timer {
           TimerInterrupt::None => {}
         }
 
-        let prev_and_result = self.counter_and_result();
+        let prev_and_result = counter_and_result(self.counter, self.tac);
 
         self.counter = self.counter.wrapping_add(1);
 
-        let curr_and_result = self.counter_and_result();
+        let curr_and_result = counter_and_result(self.counter, self.tac);
 
         if is_falling_edge!(prev_and_result, curr_and_result) {
           self.increment_tima();
@@ -90,11 +90,10 @@ impl Timer {
     match address {
       // Writing to DIV resets the internal counter
       0xFF04 => {
-        let prev_and_result = self.counter_and_result();
+        let prev_and_result = counter_and_result(self.counter, self.tac);
+        let curr_and_result = counter_and_result(0, self.tac);
 
         self.counter = 0;
-
-        let curr_and_result = self.counter_and_result();
 
         if is_falling_edge!(prev_and_result, curr_and_result) {
           self.increment_tima();
@@ -121,11 +120,10 @@ impl Timer {
       }
 
       0xFF07 => {
-        let prev_and_result = self.counter_and_result();
+        let prev_and_result = counter_and_result(self.counter, self.tac);
+        let curr_and_result = counter_and_result(self.counter, value);
 
         self.tac = value & 0x07;
-
-        let curr_and_result = self.counter_and_result();
 
         if is_falling_edge!(prev_and_result, curr_and_result) {
           self.increment_tima();
@@ -150,11 +148,11 @@ impl Timer {
     // with `STOP` shenanigans.
     (self.counter >> 6) as u8
   }
+}
 
-  /// Gets the current and result for the timer counter.
-  const fn counter_and_result(&self) -> bool {
-    is_flag_set!(self.tac, TIMER_ENABLE_MASK) && is_flag_set!(self.counter, tac_bit_mask(self.tac))
-  }
+/// Gets the and result for the timer counter.
+const fn counter_and_result(counter: u16, tac: u8) -> bool {
+  is_flag_set!(tac, TIMER_ENABLE_MASK) && is_flag_set!(counter, tac_bit_mask(tac))
 }
 
 /// Gets the clock select bit mask from the TAC register.
