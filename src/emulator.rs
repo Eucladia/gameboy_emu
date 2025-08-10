@@ -44,8 +44,16 @@ impl Emulator {
       // ---------------------------------- T3 ----------------------------------
       self.hardware.step_sys_clock();
 
-      self.cpu.step(&mut self.hardware);
+      // NOTE: Step the timer first because of the timing sensitive test `rapid_toggle`.
+      //
+      // If we don't do this, then the timer interrupt won't be ready in time for the CPU,
+      // since the CPU checks that during T3.
+      //
+      // We can handle timer interrupts on an M-cycle basis, but then it truly doesn't
+      // wait for an M-cycle and instead triggers the interrupt/reload immediately on the
+      // current T4 after a CPU write.
       self.hardware.step_timer();
+      self.cpu.step(&mut self.hardware);
       self.hardware.step_ppu();
       self.hardware.step_apu();
       self.hardware.step_dma_transfer();

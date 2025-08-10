@@ -23,10 +23,10 @@ pub struct Timer {
 enum TimerInterrupt {
   /// There is currently no timer interrupt.
   None,
-  /// The TIMA register overflowed and an interrupt will be fired.
-  Overflowed,
-  /// The TIMA register is being reloaded.
-  Reloading,
+  /// The TIMA register overflowed and an interrupt will be fired after 4 T-cycles.
+  Overflowed { ticks: u8 },
+  /// The timer interrupt is in a reloading state for 4 T-cycles.
+  Reloading { ticks: u8 },
 }
 
 impl Timer {
@@ -43,24 +43,33 @@ impl Timer {
 
   /// Steps the timer by a T-cycle.
   pub fn step(&mut self, interrupts: &mut Interrupts, sys_clock: &SystemClock) {
+    // Handle the timer interrupt delay separately, so we can actually mock
+    // the 4 T-cycle delay for firing the interrupt.
+    match &mut self.timer_interrupt {
+      TimerInterrupt::Overflowed { ticks } => {
+        *ticks += 1;
+
+        if *ticks == TIMER_INTERRUPT_DELAY {
+          self.tima = self.tma;
+          interrupts.request_interrupt(Interrupt::Timer);
+
+          self.timer_interrupt = TimerInterrupt::Reloading { ticks: 0 };
+        }
+      }
+      TimerInterrupt::Reloading { ticks } => {
+        *ticks += 1;
+
+        if *ticks == TIMER_TIMA_RELOAD_CYCLES {
+          self.timer_interrupt = TimerInterrupt::None;
+        }
+      }
+      TimerInterrupt::None => {}
+    };
+
+    // The timer gets clocked every M-cycle, not T-cycle.
     match sys_clock.t_cycle() {
       TCycle::T1 | TCycle::T2 | TCycle::T3 => {}
-      // The timer gets clocked every M-cycle, not T-cycle.
       TCycle::T4 => {
-        match &self.timer_interrupt {
-          TimerInterrupt::Overflowed => {
-            // Reload TIMA and request an interrupt, since an M-cycle has elapsed.
-            self.tima = self.tma;
-            interrupts.request_interrupt(Interrupt::Timer);
-
-            self.timer_interrupt = TimerInterrupt::Reloading;
-          }
-          TimerInterrupt::Reloading => {
-            self.timer_interrupt = TimerInterrupt::None;
-          }
-          TimerInterrupt::None => {}
-        }
-
         let prev_and_result = counter_and_result(self.counter, self.tac);
 
         self.counter = self.counter.wrapping_add(1);
@@ -101,12 +110,12 @@ impl Timer {
       }
       0xFF05 => {
         // Writes to TIMA when it's being reloaded are ignored
-        if !matches!(self.timer_interrupt, TimerInterrupt::Reloading) {
+        if !matches!(self.timer_interrupt, TimerInterrupt::Reloading { .. }) {
           self.tima = value;
         }
 
         // Writing to TIMA when it overflowed cancels the interrupt
-        if matches!(self.timer_interrupt, TimerInterrupt::Overflowed) {
+        if matches!(self.timer_interrupt, TimerInterrupt::Overflowed { .. }) {
           self.timer_interrupt = TimerInterrupt::None;
         }
       }
@@ -114,7 +123,7 @@ impl Timer {
         self.tma = value;
 
         // Writes to TMA when it's being reloaded also updates TIMA
-        if matches!(self.timer_interrupt, TimerInterrupt::Reloading) {
+        if matches!(self.timer_interrupt, TimerInterrupt::Reloading { .. }) {
           self.tima = self.tma;
         }
       }
@@ -138,7 +147,7 @@ impl Timer {
     self.tima = self.tima.wrapping_add(1);
 
     if self.tima == 0 {
-      self.timer_interrupt = TimerInterrupt::Overflowed;
+      self.timer_interrupt = TimerInterrupt::Overflowed { ticks: 0 };
     }
   }
 
@@ -168,3 +177,7 @@ const fn tac_bit_mask(tac: u8) -> u16 {
 
 /// The bit mask for the TAC register for checking if the timer is enabled.
 const TIMER_ENABLE_MASK: u8 = 0x04;
+/// The number of T-cycles to wait before firing an interrupt.
+const TIMER_INTERRUPT_DELAY: u8 = 4;
+/// The number of T-cycles during which TIMA can be affected while reloading.
+const TIMER_TIMA_RELOAD_CYCLES: u8 = 4;
