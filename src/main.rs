@@ -136,22 +136,29 @@ fn main() {
           PhysicalKey::Code(KeyCode::ShiftLeft | KeyCode::ShiftRight) => {
             is_shift_held = matches!(state, ElementState::Pressed);
           }
+          // Shift 1 shows debug info (FPS and volume)
           PhysicalKey::Code(KeyCode::Digit1)
             if is_shift_held && matches!(state, ElementState::Pressed) =>
           {
             show_debug_info = !show_debug_info;
           }
-          // `Shift` and `-` decreases the master volume
+          // Shift and - decreases the master volume
           PhysicalKey::Code(KeyCode::Minus)
             if is_shift_held && matches!(state, ElementState::Pressed) =>
           {
             emulator.hardware.apu.decrement_volume();
           }
-          // `Shift` and `=` increases the master volume
+          // Shift and + increases the master volume
           PhysicalKey::Code(KeyCode::Equal)
             if is_shift_held && matches!(state, ElementState::Pressed) =>
           {
             emulator.hardware.apu.increment_volume();
+          }
+          // Shift and ` prints the serial bytes transferred
+          PhysicalKey::Code(KeyCode::Backquote)
+            if is_shift_held && matches!(state, ElementState::Pressed) =>
+          {
+            println!("Serial Bytes:\n{:?}", &emulator.hardware.serial_bytes);
           }
           PhysicalKey::Code(KeyCode::Space) if matches!(state, ElementState::Released) => {
             limit_frames = !limit_frames;

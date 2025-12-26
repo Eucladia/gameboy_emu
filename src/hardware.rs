@@ -45,6 +45,8 @@ pub struct Hardware {
   pub apu: Apu,
   /// The system clock.
   pub sys_clock: SystemClock,
+  /// The bytes transferred over the serial register.
+  pub serial_bytes: Vec<u8>,
   /// The enableed and requested interrupts.
   interrupts: Interrupts,
 }
@@ -68,6 +70,7 @@ impl Hardware {
       interrupts: Interrupts::new(),
       sys_clock: SystemClock::new(),
       cartridge,
+      serial_bytes: Vec::new(),
     }
   }
 
@@ -223,8 +226,10 @@ impl Hardware {
   fn read_io_register(&self, address: u16) -> u8 {
     match address {
       0xFF00 => self.joypad.read_register(),
-      // Serial transfer
-      0xFF01 | 0xFF02 => 0x0,
+      // Serial transfer data
+      0xFF01 => 0x0,
+      // Serial transfer control
+      0xFF02 => 0x0,
       0xFF04..0xFF08 => self.timer.read_register(address),
       0xFF10..0xFF27 | 0xFF30..0xFF40 => self.apu.read_register(address),
       0xFF40..0xFF4C => self.ppu.read_register(address),
@@ -237,8 +242,12 @@ impl Hardware {
   fn write_io_register(&mut self, address: u16, value: u8) {
     match address {
       0xFF00 => self.joypad.write_register(value),
-      // Serial transfer
-      0xFF01 | 0xFF02 => {}
+      // Serial transfer data
+      0xFF01 => {
+        self.serial_bytes.push(value);
+      }
+      // Serial transfer control
+      0xFF02 => {}
       0xFF04..0xFF08 => self.timer.write_register(address, value),
       0xFF10..0xFF27 | 0xFF30..0xFF40 => self.apu.write_register(address, value),
       0xFF40..0xFF4C => self.ppu.write_register(address, value),
